@@ -87,7 +87,7 @@ def sync_data():
             size_clean = raw_size.split("#")[0] if "#" in raw_size else raw_size
             stock_num = int(s.get("stockNum", 0))
 
-            # 가능성 있는 다양한 SKU 대조 패턴
+            # 쇼피파이 SKU 대조 패턴
             possible_skus = [
                 f"OZL-{sku_prefix}-{color_name}-{size_clean}",
                 f"OZL-{sku_prefix}-{size_clean}",
@@ -105,16 +105,23 @@ def sync_data():
                 variant_id = matched_variant["variant_id"]
                 inv_item_id = matched_variant["inventory_item_id"]
 
-                # 1. 가격 업데이트
+                # 1. 재고 추적 활성화(inventory_management="shopify") 및 가격 강제 업데이트
                 update_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/variants/{variant_id}.json"
-                requests.put(update_url, headers=shopify_headers, json={"variant": {"id": variant_id, "price": final_price}})
+                update_payload = {
+                    "variant": {
+                        "id": variant_id,
+                        "price": final_price,
+                        "inventory_management": "shopify"
+                    }
+                }
+                requests.put(update_url, headers=shopify_headers, json=update_payload)
 
-                # 2. 재고 세팅 (Available)
+                # 2. 재고 수량(Available) 강제 입력
                 if inv_item_id:
                     set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers)
                     updated_count += 1
 
-    print(f"-> 총 {updated_count}개 옵션의 재고 및 가격 업데이트가 완벽하게 완료되었습니다!")
+    print(f"-> 총 {updated_count}개 옵션의 재고 추적 활성화 및 수량 세팅 완료!")
 
 if __name__ == "__main__":
     sync_data()
