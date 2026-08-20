@@ -9,12 +9,27 @@ SHOPIFY_ACCESS_TOKEN = os.environ.get("SHOPIFY_ACCESS_TOKEN")
 MARGIN_RATE = 1.21
 BASE_URL = "http://www.ozlanacms.com.au:30008"
 
+def check_env_vars():
+    """환경변수 디버깅 출력"""
+    print("=== [환경변수 검증] ===")
+    if not SHOPIFY_STORE:
+        print("❌ SHOPIFY_STORE 설정 안됨")
+    else:
+        clean_store = SHOPIFY_STORE.replace("https://", "").strip("/")
+        print(f"👉 SHOPIFY_STORE: {clean_store}")
+
+    if not SHOPIFY_ACCESS_TOKEN:
+        print("❌ SHOPIFY_ACCESS_TOKEN 설정 안됨")
+    else:
+        token_preview = SHOPIFY_ACCESS_TOKEN[:8] + "..." if len(SHOPIFY_ACCESS_TOKEN) > 8 else SHOPIFY_ACCESS_TOKEN
+        print(f"👉 SHOPIFY_ACCESS_TOKEN 시작값: {token_preview}")
+    print("=========================")
+
 def get_shopify_location_id(shopify_headers):
-    """쇼피파이 기본 Location ID 조회 및 디버깅"""
-    # https:// 가 중복 들어가는 것 방지
     store_domain = SHOPIFY_STORE.replace("https://", "").strip("/") if SHOPIFY_STORE else ""
     url = f"https://{store_domain}/admin/api/2024-01/locations.json"
     
+    print(f"[요청 URL]: {url}")
     try:
         res = requests.get(url, headers=shopify_headers)
         print(f"[Location API 응답 코드]: {res.status_code}")
@@ -81,8 +96,11 @@ def get_existing_shopify_variants(shopify_headers):
     return sku_map
 
 def sync_data():
+    check_env_vars()
+    
+    clean_token = SHOPIFY_ACCESS_TOKEN.strip() if SHOPIFY_ACCESS_TOKEN else ""
     shopify_headers = {
-        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+        "X-Shopify-Access-Token": clean_token,
         "Content-Type": "application/json"
     }
     headers = {"X-Token": OZLANA_TOKEN}
