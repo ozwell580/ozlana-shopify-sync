@@ -30,7 +30,7 @@ def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_head
     requests.post(url, headers=shopify_headers, json=payload)
 
 def get_existing_shopify_variants(shopify_headers):
-    """쇼피파이 전체 Variant를 SKU 기준으로 매핑 (가장 정확한 1:1 매핑)"""
+    """쇼피파이 전체 Variant를 SKU 기준으로 매핑"""
     url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250"
     response = requests.get(url, headers=shopify_headers)
     sku_map = {}
@@ -41,7 +41,6 @@ def get_existing_shopify_variants(shopify_headers):
             for v in p.get("variants", []):
                 sku = v.get("sku")
                 if sku:
-                    # SKU 키값을 대문자로 통일하여 매핑
                     sku_map[sku.strip().upper()] = {
                         "variant_id": v.get("id"),
                         "inventory_item_id": v.get("inventory_item_id")
@@ -76,23 +75,24 @@ def sync_data():
     updated_count = 0
 
     for prod in products:
-        sku_prefix = prod.get("prodMark", "").strip().upper()
-        color_name = prod.get("colorName", "").strip().upper()
+        sku_prefix = str(prod.get("prodMark", "")).strip().upper()
+        color_name = str(prod.get("colorName", "")).strip().upper()
         
         trade_price = float(prod.get("prodTradePrice") or 0)
         final_price = f"{round(trade_price * MARGIN_RATE, 2):.2f}" if trade_price > 0 else "0.00"
         stock_list = prod.get("stocks", [])
 
         for s in stock_list:
-            size_remark = str(s.get("sizeRemark", "")).strip().split("#")[0] # '6#(37)' -> '6' 추출
+            raw_size = str(s.get("sizeRemark", "")).strip()
+            size_clean = raw_size.split("#")[0] if "#" in raw_size else raw_size
             stock_num = int(s.get("stockNum", 0))
 
-            # 다양한 가능성의 SKU 생성 규칙 대조
+            # 가능성 있는 다양한 SKU 대조 패턴
             possible_skus = [
-                f"OZL-{sku_prefix}-{color_name}-{size_remark}",  # 예: OZL-OZ0001-BLACK-6
-                f"OZL-{sku_prefix}-{size_remark}",             # 예: OZL-OZ0001-6
-                f"{sku_prefix}-{size_remark}",                 # 예: OZ0001-6
-                f"{sku_prefix}-{color_name}-{size_remark}"     # 예: OZ0001-BLACK-6
+                f"OZL-{sku_prefix}-{color_name}-{size_clean}",
+                f"OZL-{sku_prefix}-{size_clean}",
+                f"{sku_prefix}-{color_name}-{size_clean}",
+                f"{sku_prefix}-{size_clean}"
             ]
 
             matched_variant = None
@@ -109,12 +109,12 @@ def sync_data():
                 update_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/variants/{variant_id}.json"
                 requests.put(update_url, headers=shopify_headers, json={"variant": {"id": variant_id, "price": final_price}})
 
-                # 2. 재고 세팅 (Available 수량 적용)
+                # 2. 재고 세팅 (Available)
                 if inv_item_id:
                     set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers)
                     updated_count += 1
 
-    print(f"-> 총 {updated_count}개 옵션의 재고 및 가격 업데이트가 성공적으로 완료되었습니다!")
+    print(f"-> 총 {updated_count}개 옵션의 재고 및 가격 업데이트가 완벽하게 완료되었습니다!")
 
 if __name__ == "__main__":
     sync_data()
