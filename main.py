@@ -6,8 +6,26 @@ OZLANA_TOKEN = os.environ.get("OZLANA_TOKEN")
 SHOPIFY_STORE = os.environ.get("SHOPIFY_STORE")
 SHOPIFY_ACCESS_TOKEN = os.environ.get("SHOPIFY_ACCESS_TOKEN")
 
-# 마진 비율 설정 (10% 마진 = 원가 x 1.10)
-MARGIN_RATE = 1.10
+MARGIN_RATE = 1.10  # 10% 마진
+
+def get_existing_shopify_products(shopify_headers):
+    """쇼피파이에 이미 등록된 상품 목록(SKU 기준)을 수집합니다."""
+    url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250"
+    response = requests.get(url, headers=shopify_headers)
+    existing_map = {}
+    
+    if response.status_code == 200:
+        products = response.json().get("products", [])
+        for p in products:
+            for variant in p.get("variants", []):
+                sku = variant.get("sku")
+                if sku:
+                    existing_map[sku] = {
+                        "product_id": p["id"],
+                        "variant_id": variant["id"],
+                        "inventory_item_id": variant.get("inventory_item_id")
+                    }
+    return existing_map
 
 def sync_data():
     print("1. 오즈라나 서버 데이터 수집 중...")
@@ -27,45 +45,54 @@ def sync_data():
         "Content-Type": "application/json"
     }
 
-    shopify_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json"
+    # 2. 쇼피파이에 이미 등록되어 있는 SKU 맵핑 가져오기
+    print("2. 기존 쇼피파이 등록 상품 조회 중...")
+    existing_products = get_existing_shopify_products(shopify_headers)
 
     for prod in products:
         prod_name = prod.get("prodName", "OZLANA Product")
         sku = prod.get("prodMark", "")
         
-        # 오즈라나 원가 수집 (price, wholesalePrice, cost 등 존재하는 원가 필드 확인)
         cost_price = float(prod.get("price") or prod.get("wholesalePrice") or prod.get("retailPrice") or 0)
-        
-        # 원가에 마진 10% 적용 및 소수점 둘째자리 반올림
-        if cost_price > 0:
-            final_price = f"{round(cost_price * MARGIN_RATE, 2):.2f}"
-        else:
-            final_price = "0.00"
+        final_price = f"{round(cost_price * MARGIN_RATE, 2):.2f}" if cost_price > 0 else "0.00"
+        stock_qty = int(prod.get("stock", prod.get("quantity", 0)))
 
-        # 재고 수량 추출
-        stock_qty = prod.get("stock", prod.get("quantity", 0))
-
-        product_data = {
-            "product": {
-                "title": prod_name,
-                "body_html": f"<strong>Model:</strong> {sku}<br><strong>Color:</strong> {prod.get('colorName', '')}",
-                "vendor": "OZLANA",
-                "variants": [
-                    {
-                        "sku": sku,
-                        "price": final_price, # 마진 10% 적용된 최종 판매가
-                        "inventory_management": "shopify",
-                        "inventory_quantity": int(stock_qty)
-                    }
-                ]
+        # 기존에 등록된 SKU가 존재하는 경우 -> 가격/재고만 업데이트
+        if sku in existing_products:
+            prod_info = existing_products[sku]
+            update_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/variants/{prod_info['variant_id']}.json"
+            update_data = {
+                "variant": {
+                    "id": prod_info['variant_id'],
+                    "price": final_price,
+                    "inventory_quantity": stock_qty
+                }
             }
-        }
+            res = requests.put(update_url, headers=shopify_headers, json=update_data)
+            if res.status_code == 200:
+                print(f"-> [업데이트 성공] {prod_name} (SKU: {sku}) | 가격: ${final_price}")
+            else:
+                print(f"-> [업데이트 실패] {prod_name}: {res.status_code}")
         
-        response = requests.post(shopify_url, headers=shopify_headers, json=product_data)
-        if response.status_code in [200, 201]:
-            print(f"-> 동기화 성공: {prod_name} | 오즈라나원가: ${cost_price} -> 최종판매가(10%마진): ${final_price}")
+        # 신규 상품인 경우 -> 새로 등록
         else:
-            print(f"-> 등록 실패({prod_name}): {response.status_code}")
+            create_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json"
+            product_data = {
+                "product": {
+                    "title": prod_name,
+                    "body_html": f"<strong>Model:</strong> {sku}<br><strong>Color:</strong> {prod.get('colorName', '')}",
+                    "vendor": "OZLANA",
+                    "variants": [{
+                        "sku": sku,
+                        "price": final_price,
+                        "inventory_management": "shopify",
+                        "inventory_quantity": stock_qty
+                    }]
+                }
+            }
+            res = requests.post(create_url, headers=shopify_headers, json=product_data)
+            if res.status_code in [200, 201]:
+                print(f"-> [신규 등록 성공] {prod_name} (SKU: {sku}) | 가격: ${final_price}")
 
 if __name__ == "__main__":
     sync_data()
