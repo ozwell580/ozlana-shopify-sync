@@ -29,28 +29,24 @@ def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_head
     }
     requests.post(url, headers=shopify_headers, json=payload)
 
-def get_existing_shopify_products(shopify_headers):
-    """쇼피파이 상품 및 Variant / InventoryItem ID 매핑"""
+def get_existing_shopify_variants(shopify_headers):
+    """쇼피파이 전체 Variant를 SKU 기준으로 매핑 (가장 정확한 1:1 매핑)"""
     url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250"
     response = requests.get(url, headers=shopify_headers)
-    existing_map = {}
+    sku_map = {}
     
     if response.status_code == 200:
         products = response.json().get("products", [])
         for p in products:
-            title = p["title"].strip()
-            variants_map = {}
             for v in p.get("variants", []):
-                if v.get("sku"):
-                    variants_map[v.get("sku")] = {
+                sku = v.get("sku")
+                if sku:
+                    # SKU 키값을 대문자로 통일하여 매핑
+                    sku_map[sku.strip().upper()] = {
                         "variant_id": v.get("id"),
                         "inventory_item_id": v.get("inventory_item_id")
                     }
-            existing_map[title] = {
-                "product_id": p["id"],
-                "variants": variants_map
-            }
-    return existing_map
+    return sku_map
 
 def sync_data():
     headers = {"X-Token": OZLANA_TOKEN}
@@ -59,12 +55,14 @@ def sync_data():
         "Content-Type": "application/json"
     }
 
-    print("1. 쇼피파이 Location ID 확인 중...")
+    print("1. 쇼피파이 Location ID 및 기존 Variant 수집 중...")
     location_id = get_shopify_location_id(shopify_headers)
     if not location_id:
         print("쇼피파이 Location ID를 불러오지 못했습니다.")
         return
-    print(f"-> Location ID 확인 완료: {location_id}")
+
+    shopify_variants = get_existing_shopify_variants(shopify_headers)
+    print(f"-> 총 {len(shopify_variants)}개 쇼피파이 SKU 매핑 완료")
 
     print("2. 오즈라나 /stocks API 수집 중...")
     res_stocks = requests.get(f"{BASE_URL}/stocks", headers=headers)
@@ -74,100 +72,49 @@ def sync_data():
 
     raw_data = res_stocks.json().get("data", [])
     products = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-    print(f"-> 총 {len(products)}개 상품 데이터 수집 완료")
 
-    print("3. 쇼피파이 기존 상품 데이터 매핑 중...")
-    existing_products = get_existing_shopify_products(shopify_headers)
+    updated_count = 0
 
     for prod in products:
-        prod_id = prod.get("id")
-        prod_name = prod.get("prodName", "").strip()
-        sku_prefix = prod.get("prodMark", "")
-        color_name = prod.get("colorName", "")
+        sku_prefix = prod.get("prodMark", "").strip().upper()
+        color_name = prod.get("colorName", "").strip().upper()
         
-        if not prod_name:
-            continue
-
         trade_price = float(prod.get("prodTradePrice") or 0)
         final_price = f"{round(trade_price * MARGIN_RATE, 2):.2f}" if trade_price > 0 else "0.00"
-        image_url = f"{BASE_URL}/image/{prod_id}" if prod_id else None
-        images = [{"src": image_url}] if image_url else []
         stock_list = prod.get("stocks", [])
 
-        # 기존 상품이 존재하는 경우
-        if prod_name in existing_products:
-            prod_info = existing_products[prod_name]
-            existing_variants = prod_info["variants"]
+        for s in stock_list:
+            size_remark = str(s.get("sizeRemark", "")).strip().split("#")[0] # '6#(37)' -> '6' 추출
+            stock_num = int(s.get("stockNum", 0))
 
-            for s in stock_list:
-                size_remark = s.get("sizeRemark", "Free")
-                stock_num = int(s.get("stockNum", 0))
-                sku = f"{sku_prefix}-{size_remark}"
+            # 다양한 가능성의 SKU 생성 규칙 대조
+            possible_skus = [
+                f"OZL-{sku_prefix}-{color_name}-{size_remark}",  # 예: OZL-OZ0001-BLACK-6
+                f"OZL-{sku_prefix}-{size_remark}",             # 예: OZL-OZ0001-6
+                f"{sku_prefix}-{size_remark}",                 # 예: OZ0001-6
+                f"{sku_prefix}-{color_name}-{size_remark}"     # 예: OZ0001-BLACK-6
+            ]
 
-                if sku in existing_variants:
-                    v_info = existing_variants[sku]
-                    variant_id = v_info["variant_id"]
-                    inv_item_id = v_info["inventory_item_id"]
+            matched_variant = None
+            for target_sku in possible_skus:
+                if target_sku.upper() in shopify_variants:
+                    matched_variant = shopify_variants[target_sku.upper()]
+                    break
 
-                    # 가격 업데이트
-                    update_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/variants/{variant_id}.json"
-                    requests.put(update_url, headers=shopify_headers, json={"variant": {"id": variant_id, "price": final_price}})
+            if matched_variant:
+                variant_id = matched_variant["variant_id"]
+                inv_item_id = matched_variant["inventory_item_id"]
 
-                    # 재고 수량(Available) Location 지정 업데이트
-                    if inv_item_id:
-                        set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers)
+                # 1. 가격 업데이트
+                update_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/variants/{variant_id}.json"
+                requests.put(update_url, headers=shopify_headers, json={"variant": {"id": variant_id, "price": final_price}})
 
-            print(f"-> [재고/가격 완벽 업데이트] {prod_name} ({sku_prefix})")
+                # 2. 재고 세팅 (Available 수량 적용)
+                if inv_item_id:
+                    set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers)
+                    updated_count += 1
 
-        # 신규 상품 등록
-        else:
-            variants = []
-            if stock_list:
-                for s in stock_list:
-                    size_remark = s.get("sizeRemark", "Free")
-                    barcode = str(s.get("barCode", ""))
-
-                    variants.append({
-                        "option1": size_remark,
-                        "price": final_price,
-                        "sku": f"{sku_prefix}-{size_remark}",
-                        "barcode": barcode,
-                        "inventory_management": "shopify"
-                    })
-
-            create_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json"
-            product_data = {
-                "product": {
-                    "title": prod_name,
-                    "body_html": f"<strong>Model:</strong> {sku_prefix}<br><strong>Color:</strong> {color_name}",
-                    "vendor": "OZLANA",
-                    "options": [{"name": "Size"}],
-                    "images": images,
-                    "variants": variants
-                }
-            }
-            res = requests.post(create_url, headers=shopify_headers, json=product_data)
-            
-            # 신규 등록 후 각 옵션의 Inventory Location 수량 지정
-            if res.status_code in [200, 201]:
-                new_prod = res.json().get("product", {})
-                new_variants = new_prod.get("variants", [])
-                
-                for nv in new_variants:
-                    nv_sku = nv.get("sku", "")
-                    inv_item_id = nv.get("inventory_item_id")
-                    
-                    # 해당 SKU의 오즈라나 재고 수량 찾기
-                    target_stock = 0
-                    for s in stock_list:
-                        if f"{sku_prefix}-{s.get('sizeRemark', 'Free')}" == nv_sku:
-                            target_stock = int(s.get("stockNum", 0))
-                            break
-                    
-                    if inv_item_id:
-                        set_shopify_inventory(inv_item_id, location_id, target_stock, shopify_headers)
-
-                print(f"-> [신규 등록 및 재고 세팅 완료] {prod_name} ({sku_prefix})")
+    print(f"-> 총 {updated_count}개 옵션의 재고 및 가격 업데이트가 성공적으로 완료되었습니다!")
 
 if __name__ == "__main__":
     sync_data()
