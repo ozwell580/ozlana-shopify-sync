@@ -10,21 +10,29 @@ MARGIN_RATE = 1.21
 BASE_URL = "http://www.ozlanacms.com.au:30008"
 
 def get_shopify_location_id(shopify_headers):
-    """쇼피파이 기본 Location ID 조회"""
-    url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/locations.json"
+    """쇼피파이 기본 Location ID 조회 및 디버깅"""
+    # https:// 가 중복 들어가는 것 방지
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/") if SHOPIFY_STORE else ""
+    url = f"https://{store_domain}/admin/api/2024-01/locations.json"
+    
     try:
         res = requests.get(url, headers=shopify_headers)
+        print(f"[Location API 응답 코드]: {res.status_code}")
         if res.status_code == 200:
             locations = res.json().get("locations", [])
             if locations:
-                return locations[0]["id"]
+                loc_id = locations[0]["id"]
+                print(f"-> Location ID 조회 성공: {loc_id}")
+                return loc_id
+        else:
+            print(f"[Location API 에러 상세]: {res.text}")
     except Exception as e:
-        print(f"Location ID 조회 실패: {e}")
+        print(f"Location ID 조회 중 예외 발생: {e}")
     return None
 
 def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_headers):
-    """location_id 기준으로 실제 재고 수량(Available) 세팅"""
-    url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/inventory_levels/set.json"
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
+    url = f"https://{store_domain}/admin/api/2024-01/inventory_levels/set.json"
     payload = {
         "location_id": location_id,
         "inventory_item_id": inventory_item_id,
@@ -38,14 +46,15 @@ def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_head
         return False
 
 def get_existing_shopify_variants(shopify_headers):
-    """쇼피파이 전체 Variant를 SKU 기준으로 매핑 (페이지네이션 대응)"""
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
     sku_map = {}
-    url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250"
+    url = f"https://{store_domain}/admin/api/2024-01/products.json?limit=250"
     
     while url:
         try:
             res = requests.get(url, headers=shopify_headers)
             if res.status_code != 200:
+                print(f"[Product API 에러 응답]: {res.status_code} - {res.text}")
                 break
             
             products = res.json().get("products", [])
@@ -58,7 +67,6 @@ def get_existing_shopify_variants(shopify_headers):
                             "inventory_item_id": v.get("inventory_item_id")
                         }
             
-            # 다음 페이지 링크 확인
             link_header = res.headers.get("Link")
             url = None
             if link_header:
@@ -73,16 +81,16 @@ def get_existing_shopify_variants(shopify_headers):
     return sku_map
 
 def sync_data():
-    headers = {"X-Token": OZLANA_TOKEN}
     shopify_headers = {
         "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
         "Content-Type": "application/json"
     }
+    headers = {"X-Token": OZLANA_TOKEN}
 
     print("1. 쇼피파이 Location ID 및 기존 Variant 수집 중...")
     location_id = get_shopify_location_id(shopify_headers)
     if not location_id:
-        print("Error: 쇼피파이 Location ID를 불러오지 못했습니다.")
+        print("Error: 쇼피파이 Location ID를 불러오지 못했습니다. 위의 API 응답 코드를 확인하세요.")
         return
 
     shopify_variants = get_existing_shopify_variants(shopify_headers)
@@ -108,6 +116,7 @@ def sync_data():
         print(f"오즈라나 파싱 에러: {e}")
         return
 
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
     updated_count = 0
 
     for prod in products:
@@ -115,9 +124,7 @@ def sync_data():
             continue
 
         raw_prod_mark = str(prod.get("prodMark", "")).strip().upper()
-        # OZ30001 -> OZ0001 변환 처리
         converted_mark = raw_prod_mark.replace("OZ3", "OZ") if raw_prod_mark.startswith("OZ3") else raw_prod_mark
-        
         color_name = str(prod.get("colorName", "")).strip().upper()
         
         try:
@@ -138,7 +145,6 @@ def sync_data():
             size_clean = raw_size.split("#")[0] if "#" in raw_size else raw_size
             stock_num = int(s.get("stockNum", 0))
 
-            # 쇼피파이 SKU 대조 패턴 (OZL-OZ0001-BLACK-4 등 완벽 매칭)
             possible_skus = [
                 f"OZL-{converted_mark}-{color_name}-{size_clean}",
                 f"OZL-{raw_prod_mark}-{color_name}-{size_clean}",
@@ -158,8 +164,7 @@ def sync_data():
                 variant_id = matched_variant["variant_id"]
                 inv_item_id = matched_variant["inventory_item_id"]
 
-                # 1. 재고 관리 주체 설정(shopify) 및 가격 업데이트
-                update_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/variants/{variant_id}.json"
+                update_url = f"https://{store_domain}/admin/api/2024-01/variants/{variant_id}.json"
                 update_payload = {
                     "variant": {
                         "id": variant_id,
@@ -169,7 +174,6 @@ def sync_data():
                 }
                 requests.put(update_url, headers=shopify_headers, json=update_payload)
 
-                # 2. 재고 수량 입력
                 if inv_item_id:
                     if set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers):
                         updated_count += 1
