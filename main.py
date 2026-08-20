@@ -19,7 +19,7 @@ def get_shopify_location_id(shopify_headers):
             if locations:
                 return locations[0]["id"]
     except Exception as e:
-        print(f"Location ID 조회 중 오류 발생: {e}")
+        print(f"Location ID 조회 실패: {e}")
     return None
 
 def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_headers):
@@ -34,17 +34,21 @@ def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_head
         res = requests.post(url, headers=shopify_headers, json=payload)
         return res.status_code == 200
     except Exception as e:
-        print(f"재고 세팅 실패 (Item ID: {inventory_item_id}): {e}")
+        print(f"재고 입력 실패 (Item ID {inventory_item_id}): {e}")
         return False
 
 def get_existing_shopify_variants(shopify_headers):
-    """쇼피파이 전체 Variant를 SKU 기준으로 매핑"""
-    url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250"
+    """쇼피파이 전체 Variant를 SKU 기준으로 매핑 (페이지네이션 대응)"""
     sku_map = {}
-    try:
-        response = requests.get(url, headers=shopify_headers)
-        if response.status_code == 200:
-            products = response.json().get("products", [])
+    url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json?limit=250"
+    
+    while url:
+        try:
+            res = requests.get(url, headers=shopify_headers)
+            if res.status_code != 200:
+                break
+            
+            products = res.json().get("products", [])
             for p in products:
                 for v in p.get("variants", []):
                     sku = v.get("sku")
@@ -53,8 +57,19 @@ def get_existing_shopify_variants(shopify_headers):
                             "variant_id": v.get("id"),
                             "inventory_item_id": v.get("inventory_item_id")
                         }
-    except Exception as e:
-        print(f"쇼피파이 Variant 매핑 오류: {e}")
+            
+            # 다음 페이지 링크 확인
+            link_header = res.headers.get("Link")
+            url = None
+            if link_header:
+                links = link_header.split(",")
+                for link in links:
+                    if 'rel="next"' in link:
+                        url = link.split(";")[0].strip("<> ")
+        except Exception as e:
+            print(f"쇼피파이 Variant 매핑 중 오류: {e}")
+            break
+            
     return sku_map
 
 def sync_data():
@@ -67,7 +82,7 @@ def sync_data():
     print("1. 쇼피파이 Location ID 및 기존 Variant 수집 중...")
     location_id = get_shopify_location_id(shopify_headers)
     if not location_id:
-        print("Error: 쇼피파이 Location ID를 불러오지 못했습니다. API Token이나 Store 주소를 확인하세요.")
+        print("Error: 쇼피파이 Location ID를 불러오지 못했습니다.")
         return
 
     shopify_variants = get_existing_shopify_variants(shopify_headers)
@@ -77,7 +92,7 @@ def sync_data():
     try:
         res_stocks = requests.get(f"{BASE_URL}/stocks", headers=headers)
         if res_stocks.status_code != 200:
-            print(f"오즈라나 연동 실패: 응답 코드 {res_stocks.status_code}")
+            print(f"오즈라나 연동 실패: {res_stocks.status_code}")
             return
 
         res_json = res_stocks.json()
@@ -87,11 +102,10 @@ def sync_data():
         elif isinstance(raw_data, list):
             products = raw_data
         else:
-            print("알 수 없는 데이터 타입입니다.")
+            print("데이터 형태 불일치")
             return
-
     except Exception as e:
-        print(f"오즈라나 데이터 파싱 오류: {e}")
+        print(f"오즈라나 파싱 에러: {e}")
         return
 
     updated_count = 0
@@ -108,7 +122,7 @@ def sync_data():
         
         try:
             trade_price = float(prod.get("prodTradePrice") or 0)
-        except ValueError:
+        except (ValueError, TypeError):
             trade_price = 0.0
 
         final_price = f"{round(trade_price * MARGIN_RATE, 2):.2f}" if trade_price > 0 else "0.00"
@@ -124,7 +138,7 @@ def sync_data():
             size_clean = raw_size.split("#")[0] if "#" in raw_size else raw_size
             stock_num = int(s.get("stockNum", 0))
 
-            # 매칭 가능한 모든 SKU 패턴 확장
+            # 쇼피파이 SKU 대조 패턴 (OZL-OZ0001-BLACK-4 등 완벽 매칭)
             possible_skus = [
                 f"OZL-{converted_mark}-{color_name}-{size_clean}",
                 f"OZL-{raw_prod_mark}-{color_name}-{size_clean}",
@@ -155,7 +169,7 @@ def sync_data():
                 }
                 requests.put(update_url, headers=shopify_headers, json=update_payload)
 
-                # 2. 재고 수량 세팅
+                # 2. 재고 수량 입력
                 if inv_item_id:
                     if set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers):
                         updated_count += 1
