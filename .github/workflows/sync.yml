@@ -2,13 +2,13 @@ name: Ozlana Shopify Sync
 
 on:
   schedule:
-    # 매 6시간마다 자동으로 실행됩니다 (원하는 주기로 변경 가능)
+    # 매 6시간마다 자동으로 실행됩니다
     - cron: '0 */6 * * *'
-  workflow_dispatch: # 수동으로 원할 때 언제든 즉시 실행 버튼 활성화
+  workflow_dispatch: # 수동 실행 버튼
 
 jobs:
   sync:
-    runs-runs-on: ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
     - name: 저장소 코드 가져오기
