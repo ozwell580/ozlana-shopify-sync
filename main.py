@@ -19,13 +19,13 @@ def sync_data():
     products = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
     print(f"-> 총 {len(products)}개 상품 수집 완료")
 
-    # 쇼피파이 API 헤더
+    # 쇼피파이 API 설정
     shopify_headers = {
         "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
         "Content-Type": "application/json"
     }
 
-    # 2. 쇼피파이로 상품 전송 (테스트로 상위 5개만 먼저 등록)
+    # 테스트로 오즈라나 상품 상위 5개를 쇼피파이에 등록합니다
     shopify_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/products.json"
     
     for prod in products[:5]:
@@ -38,7 +38,7 @@ def sync_data():
                 "variants": [
                     {
                         "option1": prod.get("colorName", "Default"),
-                        "price": "100.00",  # 판매 가격 설정
+                        "price": "100.00",
                         "sku": prod.get("prodMark", "")
                     }
                 ]
