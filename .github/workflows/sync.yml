@@ -21,7 +21,8 @@ jobs:
       env:
         OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
         SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
-        SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+        SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+        SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
         EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
       run: python main.py
