@@ -5,7 +5,11 @@ import json
 # ================= Configuration =================
 OZLANA_TOKEN = os.environ.get("OZLANA_TOKEN")
 SHOPIFY_STORE = os.environ.get("SHOPIFY_STORE")
-SHOPIFY_ACCESS_TOKEN = os.environ.get("SHOPIFY_ACCESS_TOKEN")
+
+# 새 인증 방식: 고정된 SHOPIFY_ACCESS_TOKEN 대신,
+# Client ID/Secret으로 매번 새 토큰을 자동으로 발급받습니다 (Client Credentials Grant).
+SHOPIFY_CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID")
+SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET")
 
 # EverUgg Secrets
 EVERUGG_BASE_URL = os.environ.get("EVERUGG_BASE_URL", "http://api.everugg.net.au:9990")
@@ -25,17 +29,49 @@ def check_env_vars():
         clean_store = SHOPIFY_STORE.replace("https://", "").strip("/")
         print(f"👉 SHOPIFY_STORE: {clean_store}")
 
-    if not SHOPIFY_ACCESS_TOKEN:
-        print("❌ SHOPIFY_ACCESS_TOKEN 설정 안됨")
+    if not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
+        print("❌ SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET 설정 안됨")
     else:
-        token_preview = SHOPIFY_ACCESS_TOKEN[:8] + "..." if len(SHOPIFY_ACCESS_TOKEN) > 8 else SHOPIFY_ACCESS_TOKEN
-        print(f"👉 SHOPIFY_ACCESS_TOKEN 시작값: {token_preview}")
+        print(f"👉 SHOPIFY_CLIENT_ID: {SHOPIFY_CLIENT_ID}")
 
     if not EVERUGG_USER_ID or not EVERUGG_PASSWORD:
         print("⚠️ EVERUGG 환경변수가 일부 설정되지 않았습니다.")
     else:
         print(f"👉 EVERUGG 계정 ID: {EVERUGG_USER_ID}")
     print("=========================")
+
+
+def get_shopify_access_token():
+    """Client Credentials Grant로 Admin API 토큰을 새로 발급받습니다 (24시간 유효)."""
+
+    if not SHOPIFY_STORE:
+        print("❌ SHOPIFY_STORE가 설정되지 않아 토큰을 발급받을 수 없습니다.")
+        return None
+    if not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
+        print("❌ SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET이 설정되지 않았습니다.")
+        return None
+
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
+    url = f"https://{store_domain}/admin/oauth/access_token"
+    payload = {
+        "client_id": SHOPIFY_CLIENT_ID,
+        "client_secret": SHOPIFY_CLIENT_SECRET,
+        "grant_type": "client_credentials",
+    }
+
+    try:
+        res = requests.post(url, json=payload, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            token = data.get("access_token")
+            print(f"-> Shopify 토큰 발급 성공 (범위: {data.get('scope')})")
+            return token
+        else:
+            print(f"❌ Shopify 토큰 발급 실패: {res.status_code} - {res.text}")
+    except Exception as e:
+        print(f"❌ Shopify 토큰 발급 중 예외: {e}")
+    return None
+
 
 def get_shopify_location_id(shopify_headers):
     store_domain = SHOPIFY_STORE.replace("https://", "").strip("/") if SHOPIFY_STORE else ""
@@ -243,9 +279,13 @@ def build_everugg_sku_candidates(item):
 def sync_data():
     check_env_vars()
 
-    clean_token = SHOPIFY_ACCESS_TOKEN.strip() if SHOPIFY_ACCESS_TOKEN else ""
+    access_token = get_shopify_access_token()
+    if not access_token:
+        print("Error: Shopify 접근 토큰을 발급받지 못해 동기화를 중단합니다.")
+        return
+
     shopify_headers = {
-        "X-Shopify-Access-Token": clean_token,
+        "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json"
     }
 
