@@ -247,12 +247,12 @@ def fetch_everugg_stocks():
         barcode = str(item.get("Barcode", "")).strip()
         if not barcode:
             continue
-        qty = int(item.get("AvailStockQty", 0) or 0)
+        qty = int(item.get("AvaiStockQty", 0) or 0)
         if barcode not in combined:
             combined[barcode] = dict(item)
-            combined[barcode]["AvailStockQty"] = qty
+            combined[barcode]["AvaiStockQty"] = qty
         else:
-            combined[barcode]["AvailStockQty"] += qty
+            combined[barcode]["AvaiStockQty"] += qty
 
     return list(combined.values())
 
@@ -367,7 +367,7 @@ def sync_data():
         eu_unmatched = []
 
         for item in everugg_data:
-            qty = int(item.get("AvailStockQty", 0) or 0)
+            qty = int(item.get("AvaiStockQty", 0) or 0)
             candidates = build_everugg_sku_candidates(item)
 
             matched_variant = None
