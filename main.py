@@ -231,7 +231,7 @@ def fetch_everugg_stock_list(endpoint_path, token):
     return []
 
 def fetch_everugg_stocks():
-    """EverUgg 재고 데이터 가져오기 (AuStock + SydStock 합산)"""
+    """EverUgg 재고 데이터 가져오기 (AuStock + SydStock + SydrhStock 호주 창고 3곳 합산)"""
     token = get_everugg_token()
     if not token:
         print("EverUgg 토큰을 가져오지 못했습니다.")
@@ -239,9 +239,10 @@ def fetch_everugg_stocks():
 
     au_stock = fetch_everugg_stock_list("/Api/Stock/AuStock", token)
     syd_stock = fetch_everugg_stock_list("/Api/Stock/SydStock", token)
+    sydrh_stock = fetch_everugg_stock_list("/Api/Stock/SydrhStock", token)  # AUSYD2 Rosehill 창고
 
     combined = {}
-    for item in au_stock + syd_stock:
+    for item in au_stock + syd_stock + sydrh_stock:
         if not isinstance(item, dict):
             continue
         barcode = str(item.get("Barcode", "")).strip()
