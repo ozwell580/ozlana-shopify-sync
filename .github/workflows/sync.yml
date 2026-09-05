@@ -13,4 +13,21 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-    - name: 필수
+    - name: 필수 라이브러리 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+    - name: 동기화 스크립트 실행
+      env:
+        OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
+        SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+        SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+        SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
+        EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
+      run: python list_missing_everugg_products.py
+    - name: CSV 파일 업로드
+      uses: actions/upload-artifact@v4
+      with:
+        name: everugg-unmatched-products
+        path: everugg_unmatched_products.csv
