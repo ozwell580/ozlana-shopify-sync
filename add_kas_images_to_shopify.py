@@ -192,9 +192,12 @@ def main():
     if args.codes:
         codes.extend(c.strip() for c in args.codes.split(",") if c.strip())
     if args.links_csv:
-        with open(args.links_csv, encoding="utf-8") as f:
+        with open(args.links_csv, encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
-            codes.extend(row["code"].strip() for row in reader if row.get("code", "").strip())
+            for row in reader:
+                code_val = (row.get("code") or row.get("Code") or "").strip()
+                if code_val:
+                    codes.append(code_val)
 
     codes = sorted(set(codes))
     if not codes:
