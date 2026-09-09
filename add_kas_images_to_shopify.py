@@ -17,9 +17,10 @@ main.py와 같은 저장소(ozlana-shopify-sync)에 넣고 실행하세요.
 
 import argparse
 import csv
+import os
 import sys
 import time
-from collections import defaultdict
+from functools import lru_cache
 
 import requests
 
@@ -31,7 +32,14 @@ GITHUB_BRANCH = "main"
 IMAGES_DIR = "images"
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
-_TREE_CACHE = None
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+
+
+def _github_headers():
+    headers = {"Accept": "application/vnd.github+json"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+    return headers
 
 
 def github_raw_url(code, subfolder, filename):
@@ -41,44 +49,36 @@ def github_raw_url(code, subfolder, filename):
     )
 
 
-def _load_github_tree():
-    """GitHub API로 ozwear_test.py 저장소의 전체 파일 목록을 한 번에 가져와 캐싱합니다.
-    (로컬 파일시스템 대신 사용 - 어디서 실행하든 동작하도록)"""
-
-    global _TREE_CACHE
-    if _TREE_CACHE is not None:
-        return _TREE_CACHE
-
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/git/trees/{GITHUB_BRANCH}?recursive=1"
-    res = requests.get(url, timeout=30)
-    res.raise_for_status()
+def _github_list_dir(path):
+    """GitHub Contents API로 저장소 안의 특정 폴더 내용을 나열합니다."""
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    res = requests.get(url, headers=_github_headers(), timeout=30)
+    if res.status_code != 200:
+        return []
     data = res.json()
-
-    tree = defaultdict(lambda: defaultdict(list))  # tree[code][color] = [filenames]
-    prefix = f"{IMAGES_DIR}/"
-    for entry in data.get("tree", []):
-        path = entry.get("path", "")
-        if entry.get("type") != "blob" or not path.startswith(prefix):
-            continue
-        parts = path[len(prefix):].split("/")
-        if len(parts) != 3:
-            continue
-        code, color, filename = parts
-        if filename.lower().endswith(IMAGE_EXTENSIONS):
-            tree[code][color].append(filename)
-
-    for code in tree:
-        for color in tree[code]:
-            tree[code][color].sort()
-
-    _TREE_CACHE = tree
-    print(f"GitHub 저장소 이미지 목록 로드 완료: 코드 {len(tree)}개")
-    return tree
+    return data if isinstance(data, list) else []
 
 
 def list_local_subfolders(code):
-    tree = _load_github_tree()
-    return dict(tree.get(code, {}))
+    """images/{code}/ 아래의 색상별 하위 폴더와 이미지 파일 목록을 GitHub API로 직접 조회합니다
+    (저장소 전체를 한 번에 불러오지 않고, 코드 하나씩만 조회 - 대용량 저장소 대응)"""
+
+    result = {}
+    entries = _github_list_dir(f"{IMAGES_DIR}/{code}")
+    for entry in entries:
+        if entry.get("type") != "dir":
+            continue
+        color = entry["name"]
+        sub_entries = _github_list_dir(f"{IMAGES_DIR}/{code}/{color}")
+        files = sorted(
+            e["name"] for e in sub_entries
+            if e.get("type") == "file" and e["name"].lower().endswith(IMAGE_EXTENSIONS)
+        )
+        if files:
+            result[color] = files
+        time.sleep(0.1)
+
+    return result
 
 
 def get_products_with_code(shopify_headers, store_domain, code):
