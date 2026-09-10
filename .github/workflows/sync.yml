@@ -25,7 +25,8 @@ jobs:
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
         EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
-      run: python main.py
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: python add_kas_images_to_shopify.py --links-csv apparel_dropbox_links.csv
     - name: CSV 파일 업로드
       uses: actions/upload-artifact@v4
       with:
