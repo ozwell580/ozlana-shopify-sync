@@ -32,7 +32,7 @@ GITHUB_BRANCH = "main"
 IMAGES_DIR = "images"
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_TOKEN = os.environ.get("IMAGES_REPO_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
 
 
 def _github_headers():
