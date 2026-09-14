@@ -25,7 +25,7 @@ jobs:
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
         EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
-      run: python main.py
+      run: python find_as_ugg_missing_images.py
     - name: CSV 파일 업로드
       uses: actions/upload-artifact@v4
       with:
