@@ -26,7 +26,7 @@ jobs:
         EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
         EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
         IMAGES_REPO_TOKEN: ${{ secrets.IMAGES_REPO_TOKEN }}
-      run: python add_kas_images_to_shopify.py --codes "15545,15563,15564,15607,15701,15702,15710,15720,15801,15802,15810,15820,15901,15902,512015,513009,521029,AS3035K,AS7047K,ASA040,ASA051,ASA080,ASZ007,ASZ021,ASZ022,ASZ036"
+      run: python add_kas_images_to_shopify.py --links-csv apparel_dropbox_links.csv
     - name: CSV 파일 업로드
       uses: actions/upload-artifact@v4
       with:
