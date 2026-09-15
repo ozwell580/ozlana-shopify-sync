@@ -14,7 +14,7 @@ from main import (
 )
 import requests
 
-TARGET_CODES = ["ASA068", "ASA038", "ASA046"]
+TARGET_CODES = ["ASZ050", "ASZ051", "ASZ041", "ASZ019", "ASZ025", "ASZ023", "ASA056", "ASZ046", "ASZ020"]
 
 def main():
     access_token = get_shopify_access_token()
@@ -40,6 +40,8 @@ def main():
 
         if not target_items:
             print(f"  -> EverUgg 데이터에 {target_code}가 없음!")
+            similar = [k for k in shopify_variants.keys() if target_code in k]
+            print(f"  '{target_code}'가 포함된 실제 Shopify SKU들: {similar}")
             continue
 
         for item in target_items:
