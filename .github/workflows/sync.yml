@@ -25,7 +25,7 @@ jobs:
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
         EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
-      run: python fix_all_zero_stock.py
+      run: python debug_trace_asa068.py
     - name: CSV 파일 업로드
       uses: actions/upload-artifact@v4
       with:
