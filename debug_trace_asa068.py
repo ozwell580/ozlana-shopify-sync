@@ -14,7 +14,7 @@ from main import (
 )
 import requests
 
-TARGET_CODES = ["ASZ050", "ASZ051", "ASZ041", "ASZ019", "ASZ025", "ASZ023", "ASA056", "ASZ046", "ASZ020"]
+TARGET_CODES = ["AS7047K", "AS3172K", "AS2075K", "AS2063K", "AS3168K"]
 
 def main():
     access_token = get_shopify_access_token()
