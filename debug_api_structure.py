@@ -31,6 +31,16 @@ def main():
 
         if "ASA068" in res.text:
             print("✅ 'ASA068' 문자열이 원본 응답 안에 존재함")
+
+            body = res.json()
+            result = body.get("result", [])
+            matched_items = [
+                item for item in result
+                if isinstance(item, dict) and str(item.get("ProductCode", "")).strip().upper() == "ASA068"
+            ]
+            print(f"  -> ASA068로 정확히 매칭된 항목 수: {len(matched_items)}")
+            for item in matched_items:
+                print(f"     {item}")
         else:
             print("❌ 'ASA068' 문자열이 원본 응답 안에 없음")
 
