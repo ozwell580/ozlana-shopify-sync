@@ -254,9 +254,12 @@ def fetch_everugg_stocks():
 def build_everugg_sku_candidates(item):
     """EverUgg 재고 항목 하나에서 쇼피파이 SKU로 매칭해볼 후보 목록 생성.
     실제 업로드 CSV 확인 결과 정식 규칙: AS-{ProductCode}-{ColorName}-{Size}
-    단, 가방/액세서리처럼 사이즈가 없는 상품은 AS-{ProductCode}-{ColorName} 형태로 등록되어 있고,
-    에버어그 API가 사이즈를 "One Size" 같은 값으로 줄 때도 있어서
-    사이즈 유무와 관계없이 2단/3단 후보를 모두 생성함(공백은 하이픈으로도 시도).
+    - 가방/액세서리처럼 사이즈가 없는 상품은 AS-{ProductCode}-{ColorName} 형태로 등록됨
+    - 에버어그가 사이즈를 "One Size"로 줄 때도 있어 사이즈 유무와 무관하게 2단 후보도 생성
+    - KIDS 신발은 에버어그가 나이대 사이즈(4-5, 6-7 등)로 주지만 Shopify는 발 크기(25, 27 등)로
+      등록되어 있어 매핑 필요
+    - 의류류는 에버어그가 약자(S/M/L/XL)로 주지만 Shopify는 전체 단어(SMALL/MEDIUM/LARGE/EXTRA-LARGE)
+      로 등록되어 있어 매핑 필요
     """
     barcode = str(item.get("Barcode", "")).strip().upper()
     product_code = str(item.get("ProductCode", "")).strip().upper()
@@ -267,14 +270,28 @@ def build_everugg_sku_candidates(item):
     color_name_dash = color_name.replace(" ", "-")
     color_code_dash = color_code.replace(" ", "-")
 
+    KIDS_SHOE_SIZE_MAP = {
+        "4-5": "25", "6-7": "27", "8-10": "29", "11-12": "31", "13-2": "33",
+    }
+    CLOTHING_SIZE_MAP = {
+        "S": "SMALL", "M": "MEDIUM", "L": "LARGE", "XL": "EXTRA-LARGE",
+    }
+
+    mapped_sizes = [size]
+    if size in KIDS_SHOE_SIZE_MAP:
+        mapped_sizes.append(KIDS_SHOE_SIZE_MAP[size])
+    if size in CLOTHING_SIZE_MAP:
+        mapped_sizes.append(CLOTHING_SIZE_MAP[size])
+
     candidates = []
 
-    if product_code and color_name and size:
-        candidates.append(f"AS-{product_code}-{color_name}-{size}")
-        candidates.append(f"AS-{product_code}-{color_name_dash}-{size}")
-    if product_code and color_code and size:
-        candidates.append(f"AS-{product_code}-{color_code}-{size}")
-        candidates.append(f"AS-{product_code}-{color_code_dash}-{size}")
+    for s in mapped_sizes:
+        if product_code and color_name and s:
+            candidates.append(f"AS-{product_code}-{color_name}-{s}")
+            candidates.append(f"AS-{product_code}-{color_name_dash}-{s}")
+        if product_code and color_code and s:
+            candidates.append(f"AS-{product_code}-{color_code}-{s}")
+            candidates.append(f"AS-{product_code}-{color_code_dash}-{s}")
 
     if product_code and color_name:
         candidates.append(f"AS-{product_code}-{color_name}")
