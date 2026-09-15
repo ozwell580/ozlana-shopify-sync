@@ -260,6 +260,8 @@ def fetch_everugg_stocks():
 def build_everugg_sku_candidates(item):
     """EverUgg 재고 항목 하나에서 쇼피파이 SKU로 매칭해볼 후보 목록 생성.
     실제 업로드 CSV 확인 결과 정식 규칙: AS-{ProductCode}-{ColorName}-{Size}
+    단, 가방/액세서리처럼 사이즈가 없는 상품은 AS-{ProductCode}-{ColorName} 형태로 등록되어 있어
+    사이즈가 없을 때도 후보를 생성하도록 함(공백은 하이픈으로도 변환해서 시도).
     """
     barcode = str(item.get("Barcode", "")).strip().upper()
     product_code = str(item.get("ProductCode", "")).strip().upper()
@@ -267,13 +269,29 @@ def build_everugg_sku_candidates(item):
     color_code = str(item.get("ColorCode", "")).strip().upper()
     size = str(item.get("Size", "")).strip().upper()
 
+    color_name_dash = color_name.replace(" ", "-")
+    color_code_dash = color_code.replace(" ", "-")
+
     candidates = []
+
     if product_code and color_name and size:
         candidates.append(f"AS-{product_code}-{color_name}-{size}")
+        candidates.append(f"AS-{product_code}-{color_name_dash}-{size}")
     if product_code and color_code and size:
         candidates.append(f"AS-{product_code}-{color_code}-{size}")
+        candidates.append(f"AS-{product_code}-{color_code_dash}-{size}")
+
+    # 사이즈가 없는 상품(가방/액세서리 등) - 2단 SKU 후보 추가
+    if product_code and color_name and not size:
+        candidates.append(f"AS-{product_code}-{color_name}")
+        candidates.append(f"AS-{product_code}-{color_name_dash}")
+    if product_code and color_code and not size:
+        candidates.append(f"AS-{product_code}-{color_code}")
+        candidates.append(f"AS-{product_code}-{color_code_dash}")
+
     if barcode:
         candidates.append(barcode)
+
     return candidates
 
 # ================= Main Sync Execution =================
