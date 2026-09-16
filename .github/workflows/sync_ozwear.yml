@@ -1,8 +1,14 @@
 name: Ozwear Inventory Sync
 on:
-  schedule:
-    - cron: '0 1,13 * * *'
   workflow_dispatch:
+    inputs:
+      codes:
+        description: '쉼표로 구분된 스타일 코드 목록'
+        required: true
+      tag:
+        description: '추가할 태그 이름'
+        required: true
+        default: 'EVER-KIDS'
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -19,8 +25,7 @@ jobs:
         pip install requests
     - name: 태그 작업 실행
       env:
-        OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
-        OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
+        SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
         SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-      run: python tag_everugg_products.py
+      run: python tag_everugg_products.py --codes "${{ github.event.inputs.codes }}" --tag "${{ github.event.inputs.tag }}"
