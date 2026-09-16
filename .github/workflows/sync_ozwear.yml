@@ -4,10 +4,10 @@ on:
     inputs:
       codes:
         description: '쉼표로 구분된 스타일 코드 목록'
-        required: true
+        required: false
       tag:
         description: '추가할 태그 이름'
-        required: true
+        required: false
         default: 'EVER-KIDS'
 jobs:
   sync:
@@ -28,4 +28,4 @@ jobs:
         SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
         SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-      run: python tag_everugg_products.py --codes "${{ github.event.inputs.codes }}" --tag "${{ github.event.inputs.tag }}"
+      run: python tag_all_everugg.py
