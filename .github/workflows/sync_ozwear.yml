@@ -20,4 +20,7 @@ jobs:
     - name: 태그 작업 실행
       env:
         OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
-        OZWEAR_API_SECRET: ${{
+        OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
+        SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+        SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+      run: python tag_everugg_products.py
