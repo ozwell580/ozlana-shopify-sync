@@ -1,8 +1,10 @@
 """
 오즈라나 쿠키 컬렉션 신상품 3개(OZ3035, OZ1041, OZ0033)의 이미지를
-Dropbox 공유 폴더에서 zip으로 통째로 다운로드한 뒤, Shopify 상품에 직접 첨부합니다.
+Dropbox 공유 폴더에서 zip으로 통째로 다운로드한 뒤, 20메가픽셀 제한에 걸리지 않도록
+리사이즈해서 Shopify 상품에 직접 첨부합니다.
 (GitHub 업로드 단계 없이 base64로 바로 첨부하는 방식)
 main.py와 같은 저장소(ozlana-shopify-sync)에 넣고 실행하세요.
+Pillow가 필요합니다: pip install Pillow
 
 사용법:
     python add_ozlana_cookie_images.py
@@ -13,10 +15,13 @@ import io
 import zipfile
 
 import requests
+from PIL import Image
 
 from main import get_shopify_access_token, SHOPIFY_STORE
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+MAX_PIXELS = 19_000_000  # Shopify 제한(2000만)보다 살짝 여유를 둠
+MAX_DIMENSION = 4096  # 긴 변 기준 최대 픽셀
 
 PRODUCTS = [
     {
@@ -60,7 +65,29 @@ def download_images(dropbox_url):
     return images
 
 
+def resize_if_needed(data):
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        return data  # 열 수 없는 파일이면 원본 그대로 반환(업로드 시도)
+
+    width, height = img.size
+    if width * height <= MAX_PIXELS and max(width, height) <= MAX_DIMENSION:
+        return data  # 리사이즈 불필요
+
+    scale = min((MAX_PIXELS / (width * height)) ** 0.5, MAX_DIMENSION / max(width, height))
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    img = img.convert("RGB") if img.mode in ("P", "RGBA", "LA") else img
+    resized = img.resize(new_size, Image.LANCZOS)
+
+    buf = io.BytesIO()
+    resized.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
 def attach_image(shopify_headers, store_domain, product_id, filename, data, position):
+    data = resize_if_needed(data)
     url = f"https://{store_domain}/admin/api/2024-01/products/{product_id}/images.json"
     payload = {
         "image": {
