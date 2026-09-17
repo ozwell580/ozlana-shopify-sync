@@ -28,4 +28,4 @@ jobs:
         SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
         SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-      run: python fix_ever_bag_tags.py
+      run: python backfill_ozlana_barcodes.py
