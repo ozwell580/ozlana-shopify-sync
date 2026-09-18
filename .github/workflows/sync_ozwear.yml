@@ -22,10 +22,10 @@ jobs:
     - name: 필수 라이브러리 설치
       run: |
         python -m pip install --upgrade pip
-        pip install requests Pillow
+        pip install requests
     - name: 태그 작업 실행
       env:
         SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
         SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-      run: python add_ozlana_cookie_images.py
+      run: python link_ozlana_cookie_variant_images.py
