@@ -40,6 +40,7 @@ HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재�
 
 def get_access_token(store, client_id, client_secret):
     """Client Credentials Grant로 매번 새 토큰 발급 (main.py와 동일한 방식)"""
+    store = store.replace("https://", "").replace("http://", "").strip("/")
     url = f"https://{store}/admin/oauth/access_token"
     resp = requests.post(
         url,
@@ -56,6 +57,7 @@ def get_access_token(store, client_id, client_secret):
 
 def fetch_products_by_vendor(store, token, vendor):
     """해당 vendor(공급업체)의 모든 상품을 REST Admin API로 페이지네이션하며 전부 가져옴"""
+    store = store.replace("https://", "").replace("http://", "").strip("/")
     products = []
     url = f"https://{store}/admin/api/{API_VERSION}/products.json"
     params = {"vendor": vendor, "limit": 250, "status": "active"}
