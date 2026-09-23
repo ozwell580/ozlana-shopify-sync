@@ -41,9 +41,10 @@ jobs:
         SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
       run: python build_order_form.py --template UGGAUS_order_form_template.xlsx --out-dir dist
-    - name: 결과 파일 커밋 (고정 파일명으로도 복사)
+    - name: 결과 파일 정리 및 커밋
       run: |
-        cp dist/UGGAUS_order_form_*.xlsx dist/UGGAUS_order_form_latest.xlsx
+        TODAY=$(date -u +%F)
+        mv "dist/UGGAUS_order_form_${TODAY}.xlsx" dist/UGGAUS_order_form_latest.xlsx
         git config user.name "github-actions"
         git config user.email "actions@github.com"
         git add dist/
