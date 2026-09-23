@@ -32,7 +32,7 @@ API_VERSION = "2024-04"
 SHEET_VENDOR_MAP = {
     "AS UGG": "AS UGG",
     "Ozlana": "Ozlana",
-    "OZWEAR": "OZWEAR",
+    "OZWEAR": "OZWEAR UGG",
 }
 
 HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재고", "SKU"]
