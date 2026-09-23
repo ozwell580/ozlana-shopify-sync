@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: '0 0,12 * * *'
   workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -16,7 +20,7 @@ jobs:
     - name: 필수 라이브러리 설치
       run: |
         python -m pip install --upgrade pip
-        pip install requests
+        pip install requests openpyxl
     - name: 동기화 스크립트 실행
       env:
         OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
@@ -31,3 +35,17 @@ jobs:
       with:
         name: everugg-unmatched-products
         path: everugg_unmatched_products.csv
+    - name: 대량주문 양식 생성
+      env:
+        SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+        SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+        SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+      run: python build_order_form.py --template UGGAUS_order_form_template.xlsx --out-dir dist
+    - name: 결과 파일 커밋 (고정 파일명으로도 복사)
+      run: |
+        cp dist/UGGAUS_order_form_*.xlsx dist/UGGAUS_order_form_latest.xlsx
+        git config user.name "github-actions"
+        git config user.email "actions@github.com"
+        git add dist/
+        git commit -m "대량주문 양식 자동 갱신" || echo "변경사항 없음"
+        git push
