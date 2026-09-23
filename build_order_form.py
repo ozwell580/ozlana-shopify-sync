@@ -55,12 +55,13 @@ def get_access_token(store, client_id, client_secret):
     return resp.json()["access_token"]
 
 
-def fetch_products_by_vendor(store, token, vendor):
-    """해당 vendor(공급업체)의 모든 상품을 REST Admin API로 페이지네이션하며 전부 가져옴"""
+def fetch_all_active_products(store, token):
+    """vendor 필터를 서버에 맡기지 않고, 활성 상품을 전부 받아온 뒤 파이썬에서 직접 매칭한다.
+    (vendor 값에 보이지 않는 공백/대소문자 차이가 있어도 놓치지 않기 위함)"""
     store = store.replace("https://", "").replace("http://", "").strip("/")
     products = []
     url = f"https://{store}/admin/api/{API_VERSION}/products.json"
-    params = {"vendor": vendor, "limit": 250, "status": "active"}
+    params = {"limit": 250, "status": "active"}
     headers = {"X-Shopify-Access-Token": token}
 
     while url:
@@ -69,16 +70,37 @@ def fetch_products_by_vendor(store, token, vendor):
         data = resp.json()
         products.extend(data.get("products", []))
 
-        # Link 헤더로 다음 페이지 커서 추출 (Shopify REST 표준 페이지네이션)
         link = resp.headers.get("Link", "")
         next_url = None
         for part in link.split(","):
             if 'rel="next"' in part:
                 next_url = part.split(";")[0].strip().strip("<>")
         url = next_url
-        params = None  # next_url 안에 이미 파라미터 포함됨
+        params = None
 
     return products
+
+
+def normalize_vendor(v):
+    """비교용으로 공백/대소문자를 정규화 (눈에 안 보이는 trailing space, 대소문자 차이 방지)"""
+    return " ".join((v or "").split()).strip().upper()
+
+
+def group_products_by_vendor(all_products, vendor_map):
+    """vendor_map = {시트이름: vendor값} 기준으로, 정규화 비교하며 상품을 시트별로 나눔"""
+    target = {normalize_vendor(v): sheet for sheet, v in vendor_map.items()}
+    grouped = {sheet: [] for sheet in vendor_map}
+    unmatched_vendors = set()
+
+    for p in all_products:
+        key = normalize_vendor(p.get("vendor"))
+        sheet = target.get(key)
+        if sheet:
+            grouped[sheet].append(p)
+        elif p.get("vendor"):
+            unmatched_vendors.add(p.get("vendor"))
+
+    return grouped, unmatched_vendors
 
 
 def find_option_index(product, keywords):
@@ -143,6 +165,15 @@ def main():
 
     token = get_access_token(store, client_id, client_secret)
 
+    print("전체 활성 상품 조회 중 (한 번만 받아서 이후 시트별로 나눠 씁니다)...")
+    all_products = fetch_all_active_products(store, token)
+    print(f"전체 활성 상품 {len(all_products)}개 수신")
+
+    grouped, unmatched_vendors = group_products_by_vendor(all_products, SHEET_VENDOR_MAP)
+    if unmatched_vendors:
+        # 혹시 vendor 표기가 살짝 다른 게 있으면 참고할 수 있도록 로그로 남김
+        print(f"[참고] 매핑 대상에 없는 vendor 값 예시: {sorted(unmatched_vendors)[:20]}")
+
     wb = openpyxl.load_workbook(args.template)  # 서식/사이즈차트 유지 위해 일반 로드
 
     for sheet_name, vendor in SHEET_VENDOR_MAP.items():
@@ -150,9 +181,7 @@ def main():
             print(f"[건너뜀] 템플릿에 '{sheet_name}' 시트가 없습니다.")
             continue
 
-        print(f"[{sheet_name}] '{vendor}' 공급업체 상품 조회 중...")
-        products = fetch_products_by_vendor(store, token, vendor)
-
+        products = grouped.get(sheet_name, [])
         rows = []
         for p in products:
             rows.extend(variant_rows(p))
