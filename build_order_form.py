@@ -35,7 +35,7 @@ SHEET_VENDOR_MAP = {
     "OZWEAR": "OZWEAR",
 }
 
-HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재고", "주문수량", "SKU"]
+HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재고", "SKU"]
 
 
 def get_access_token(store, client_id, client_secret):
@@ -113,11 +113,11 @@ def variant_rows(product):
 
 
 def write_sheet(ws, vendor_label, rows):
-    """A~H열만 새 데이터로 덮어씀. I열부터(사이즈 차트 등)는 절대 건드리지 않음."""
-    # 기존에 쓰여있던 A~H열 데이터 영역을 먼저 비움 (row 2부터 기존 max_row까지)
+    """A~G열만 새 데이터로 덮어씀 (브랜드~SKU, 순수 조회용 카탈로그). H열부터(사이즈 차트 등)는 절대 건드리지 않음."""
+    # 기존에 쓰여있던 A~G열 데이터 영역을 먼저 비움 (row 2부터 기존 max_row까지)
     old_max_row = ws.max_row
     for r in range(2, old_max_row + 1):
-        for c in range(1, 9):  # A(1) ~ H(8)
+        for c in range(1, 8):  # A(1) ~ G(7)
             ws.cell(row=r, column=c).value = None
 
     # 새 데이터 기록
@@ -128,8 +128,7 @@ def write_sheet(ws, vendor_label, rows):
         ws.cell(row=i, column=4, value=row["사이즈"])
         ws.cell(row=i, column=5, value=row["가격(AUD)"])
         ws.cell(row=i, column=6, value=row["재고"])
-        # 주문수량(G열)은 고객이 입력할 칸이라 비워둠
-        ws.cell(row=i, column=8, value=row["SKU"])
+        ws.cell(row=i, column=7, value=row["SKU"])
 
 
 def main():
