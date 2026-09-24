@@ -3,30 +3,33 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: '미리보기만 할지 (true/false)'
+        description: "true면 미리보기만, false면 실제 적용"
         required: true
-        default: 'true'
+        default: "true"
 
 jobs:
   bump-price:
     runs-on: ubuntu-latest
     steps:
-    - name: 저장소 코드 가져오기
-      uses: actions/checkout@v4
-    - name: 파이썬 환경 설정
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    - name: 필수 라이브러리 설치
-      run: pip install requests
-    - name: 가격 조정 실행
-      env:
-        SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
-        SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
-        SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-      run: |
-        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-          python bump_ozwear_prices.py --percent 10 --dry-run
-        else
-          python bump_ozwear_prices.py --percent 10
-        fi
+      - name: 저장소 코드 가져오기
+        uses: actions/checkout@v4
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: 필수 라이브러리 설치
+        run: pip install requests
+      - name: 가격 조정 실행 (dry-run)
+        if: github.event.inputs.dry_run == 'true'
+        env:
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python bump_ozwear_prices.py --percent 10 --dry-run
+      - name: 가격 조정 실행 (실제 적용)
+        if: github.event.inputs.dry_run == 'false'
+        env:
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python bump_ozwear_prices.py --percent 10
