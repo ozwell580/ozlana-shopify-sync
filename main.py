@@ -14,7 +14,11 @@ EVERUGG_BASE_URL = os.environ.get("EVERUGG_BASE_URL", "http://api.everugg.net.au
 EVERUGG_USER_ID = os.environ.get("EVERUGG_USER_ID")
 EVERUGG_PASSWORD = os.environ.get("EVERUGG_PASSWORD")
 
-MARGIN_RATE = 1.21
+# Ozlana의 prodTradePrice는 GST(부가세) 불포함 원가로 확인됨
+# (예: OZ0026 - 본사 사이트 $62 GST불포함 = API 값과 일치).
+# 마진은 더 이상 여기서 얹지 않고, GST 10%만 반영해 순수 원가로 Shopify에 반영한다.
+# 등급별 마진은 Shopify 카탈로그(가격표)에서 처리한다.
+MARGIN_RATE = 1.10
 BASE_URL_OZLANA = "http://www.ozlanacms.com.au:30008"
 
 # EverUgg의 Price 필드는 이미 GST(부가세) 포함된 최종 판매가로 확인됨
@@ -171,7 +175,8 @@ def get_existing_shopify_variants(shopify_headers):
 
 # ================= EverUgg Specific Sync =================
 def get_everugg_token():
-    """EverUgg 토큰 발급 - GET /Api/Token/getToken (쿼리 파라미터: user, password)"""
+    """EverUgg 토큰 발급 - GET /Api/Token/getToken (쿼리 파라미터: user, password)
+    EverUgg 서버가 종종 응답이 느려서, 넉넉한 타임아웃과 재시도를 둔다."""
     if not EVERUGG_USER_ID or not EVERUGG_PASSWORD:
         print("EverUgg 계정 정보가 없어 EverUgg 동기화를 건너뜁니다.")
         return None
@@ -179,18 +184,25 @@ def get_everugg_token():
     login_url = f"{EVERUGG_BASE_URL}/Api/Token/getToken"
     params = {"user": EVERUGG_USER_ID, "password": EVERUGG_PASSWORD}
 
-    try:
-        res = requests.get(login_url, params=params, timeout=10)
-        if res.status_code == 200:
-            body = res.json()
-            result_obj = body.get("result", {})
-            token = result_obj.get("token") if isinstance(result_obj, dict) else None
-            print(f"-> EverUgg 토큰 발급 결과: {body.get('msg')}")
-            return token
-        else:
-            print(f"EverUgg 토큰 발급 실패: {res.status_code} - {res.text}")
-    except Exception as e:
-        print(f"EverUgg 토큰 발급 중 예외: {e}")
+    for attempt in range(3):
+        try:
+            res = requests.get(login_url, params=params, timeout=30)
+            if res.status_code == 200:
+                body = res.json()
+                result_obj = body.get("result", {})
+                token = result_obj.get("token") if isinstance(result_obj, dict) else None
+                print(f"-> EverUgg 토큰 발급 결과: {body.get('msg')}")
+                return token
+            else:
+                print(f"EverUgg 토큰 발급 실패 ({attempt + 1}차 시도): {res.status_code} - {res.text}")
+        except Exception as e:
+            print(f"EverUgg 토큰 발급 중 예외 ({attempt + 1}차 시도): {e}")
+
+        if attempt < 2:
+            wait = 10 * (attempt + 1)
+            print(f"  {wait}초 후 재시도합니다...")
+            time.sleep(wait)
+
     return None
 
 def fetch_everugg_stock_list(endpoint_path, token):
@@ -199,7 +211,7 @@ def fetch_everugg_stock_list(endpoint_path, token):
     params = {"token": token}
     headers = {"Accept": "application/json"}
     try:
-        res = requests.get(url, params=params, headers=headers, timeout=20)
+        res = requests.get(url, params=params, headers=headers, timeout=30)
         print(f"\nDEBUG [{endpoint_path}] URL: {res.url}")
         print(f"DEBUG [{endpoint_path}] Status: {res.status_code}")
         print(f"DEBUG [{endpoint_path}] Content-Type: {res.headers.get('Content-Type')}")
