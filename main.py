@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+import time
 
 # ================= Configuration =================
 OZLANA_TOKEN = os.environ.get("OZLANA_TOKEN")
@@ -15,6 +16,11 @@ EVERUGG_PASSWORD = os.environ.get("EVERUGG_PASSWORD")
 
 MARGIN_RATE = 1.21
 BASE_URL_OZLANA = "http://www.ozlanacms.com.au:30008"
+
+# EverUgg의 Price 필드는 이미 GST(부가세) 포함된 최종 판매가로 확인됨
+# (실제 주문 사이트 가격과 API의 Price 필드 값이 정확히 일치, 예: AS2055K 23.1 = 23.1).
+# 그러므로 별도로 곱하지 않고 그대로 사용한다.
+EVERUGG_GST_MULTIPLIER = 1.0
 
 # ================= Helper Functions =================
 def check_env_vars():
@@ -99,6 +105,34 @@ def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_head
     except Exception as e:
         print(f"재고 입력 실패 (Item ID {inventory_item_id}): {e}")
         return False
+
+
+def set_shopify_price(variant_id, price, shopify_headers):
+    """variant 가격을 갱신한다. 네트워크 순간 끊김(SSL/커넥션 리셋)에도 몇 번 재시도한다."""
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
+    url = f"https://{store_domain}/admin/api/2024-01/variants/{variant_id}.json"
+    payload = {"variant": {"id": variant_id, "price": f"{price:.2f}"}}
+
+    for attempt in range(3):
+        try:
+            res = requests.put(url, headers=shopify_headers, json=payload, timeout=30)
+        except Exception as e:
+            time.sleep(2 * (attempt + 1))
+            continue
+        if res.status_code == 200:
+            return True
+        if res.status_code == 429:
+            wait = float(res.headers.get("Retry-After", 2))
+            time.sleep(wait)
+            continue
+        if res.status_code >= 500:
+            time.sleep(2 * (attempt + 1))
+            continue
+        print(f"가격 입력 실패 (Variant ID {variant_id}): {res.status_code} - {res.text[:200]}")
+        return False
+    print(f"가격 입력 최종 실패 (Variant ID {variant_id}): 재시도 모두 실패")
+    return False
+
 
 def get_existing_shopify_variants(shopify_headers):
     store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
@@ -392,6 +426,7 @@ def sync_data():
         print(f"-> EverUgg 데이터 {len(everugg_data)}건 수집 완료!")
 
         eu_updated_count = 0
+        eu_price_updated_count = 0
         eu_unmatched = []
 
         for item in everugg_data:
@@ -406,12 +441,26 @@ def sync_data():
 
             if matched_variant:
                 inv_item_id = matched_variant["inventory_item_id"]
+                variant_id = matched_variant["variant_id"]
+
                 if inv_item_id and set_shopify_inventory(inv_item_id, location_id, qty, shopify_headers):
                     eu_updated_count += 1
+
+                # 가격도 매번 최신 원가(GST 제외) 기준으로 GST 10% 포함해서 갱신
+                try:
+                    raw_price = float(item.get("Price", 0) or 0)
+                except (TypeError, ValueError):
+                    raw_price = 0.0
+
+                if raw_price > 0 and variant_id:
+                    new_price = round(raw_price * EVERUGG_GST_MULTIPLIER, 2)
+                    if set_shopify_price(variant_id, new_price, shopify_headers):
+                        eu_price_updated_count += 1
             else:
                 eu_unmatched.append(candidates[0] if candidates else "UNKNOWN")
 
         print(f"-> [EverUgg] 총 {eu_updated_count}개 옵션 재고 세팅 완료!")
+        print(f"-> [EverUgg] 총 {eu_price_updated_count}개 옵션 가격(GST 10% 포함) 세팅 완료!")
         if eu_unmatched:
             print(f"-> [EverUgg] 매칭 실패 SKU 예시 (최대 10개): {eu_unmatched[:10]}")
     else:
