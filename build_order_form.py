@@ -4,10 +4,13 @@ UGG AUS 대량주문 양식 자동 생성 스크립트
 기존 ozlana-shopify-sync 저장소에 이 파일을 추가해서 쓰세요.
 
 동작 방식:
-1. 업로드해주신 템플릿 파일(UGGAUS_order_form_template.xlsx)을 "틀"로 그대로 불러옴
-   - 사이즈 차트, 서식, 시트 구조는 전부 그대로 유지됨
-2. 각 시트(AS UGG / Ozlana / OZWEAR)의 A~H열(브랜드~SKU)만
-   Shopify Admin API에서 최신 상품/재고/가격으로 덮어씀
+1. 템플릿 파일(UGGAUS_order_form_template.xlsx)을 "틀"로 그대로 불러옴
+   - 배송정보 시트, 사이즈 차트, 서식, 시트 구조는 전부 그대로 유지됨
+2. 각 시트(AS UGG / Ozlana / OZWEAR)의 아래 칸만 Shopify 최신 데이터로 덮어씀
+   - A~G열: 브랜드, 상품명, 색상, 사이즈, 가격(AUD), 재고, SKU
+   - H열  : 무게(kg)  ← Shopify 상품 무게 (update_weights.py로 넣은 값)
+   - Z열  : 조회키    ← 배송정보 시트의 무게 자동계산 수식이 참조하는 칸
+   I~Y열(사이즈 차트 등)은 절대 건드리지 않음
 3. 날짜가 들어간 새 파일명으로 저장
 
 필요한 환경변수 (GitHub Actions Secrets에 이미 등록된 것과 동일한 이름 사용):
@@ -35,7 +38,11 @@ SHEET_VENDOR_MAP = {
     "OZWEAR": "OZWEAR UGG",
 }
 
-HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재고", "SKU"]
+HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재고", "SKU", "무게(kg)"]
+
+# 칸 위치
+COL_WEIGHT = 8    # H열: 무게(kg)
+COL_KEY = 26      # Z열: 조회키 (상품명|색상|사이즈)
 
 
 def get_access_token(store, client_id, client_secret):
@@ -112,8 +119,30 @@ def find_option_index(product, keywords):
     return None
 
 
+def variant_weight_kg(v):
+    """variant 무게를 kg으로 변환. grams가 있으면 우선 사용, 없으면 weight + weight_unit으로 계산."""
+    grams = v.get("grams")
+    if grams:
+        return round(float(grams) / 1000, 2)
+
+    weight = v.get("weight")
+    unit = (v.get("weight_unit") or "kg").lower()
+    if not weight:
+        return None
+    weight = float(weight)
+    if unit == "kg":
+        return round(weight, 2)
+    if unit == "g":
+        return round(weight / 1000, 2)
+    if unit == "lb":
+        return round(weight * 0.453592, 2)
+    if unit == "oz":
+        return round(weight * 0.0283495, 2)
+    return round(weight, 2)
+
+
 def variant_rows(product):
-    """한 상품의 모든 variant를 (색상, 사이즈, 가격, 재고, SKU) 행으로 변환"""
+    """한 상품의 모든 variant를 (색상, 사이즈, 가격, 재고, SKU, 무게) 행으로 변환"""
     color_idx = find_option_index(product, ["color", "colour", "색상"])
     size_idx = find_option_index(product, ["size", "사이즈"])
 
@@ -129,18 +158,29 @@ def variant_rows(product):
                 "가격(AUD)": float(v.get("price") or 0),
                 "재고": v.get("inventory_quantity") or 0,
                 "SKU": v.get("sku") or "",
+                "무게(kg)": variant_weight_kg(v),
             }
         )
     return rows
 
 
+def key_formula(r):
+    """배송정보 시트의 무게 수식이 상품명|색상|사이즈로 찾을 때 쓰는 조회키 수식"""
+    return f'=UPPER(TRIM(B{r}))&"|"&UPPER(TRIM(C{r}))&"|"&UPPER(TRIM(D{r}))'
+
+
 def write_sheet(ws, vendor_label, rows):
-    """A~G열만 새 데이터로 덮어씀 (브랜드~SKU, 순수 조회용 카탈로그). H열부터(사이즈 차트 등)는 절대 건드리지 않음."""
-    # 기존에 쓰여있던 A~G열 데이터 영역을 먼저 비움 (row 2부터 기존 max_row까지)
+    """A~H열과 Z열만 새 데이터로 덮어씀. I~Y열(사이즈 차트 등)은 절대 건드리지 않음."""
+    # 기존 데이터 영역을 먼저 비움 (row 2부터 기존 max_row까지)
     old_max_row = ws.max_row
     for r in range(2, old_max_row + 1):
-        for c in range(1, 8):  # A(1) ~ G(7)
+        for c in range(1, COL_WEIGHT + 1):  # A(1) ~ H(8)
             ws.cell(row=r, column=c).value = None
+        ws.cell(row=r, column=COL_KEY).value = None  # Z
+
+    # 헤더 보정 (템플릿에 무게/조회키 헤더가 없어도 채워지도록)
+    ws.cell(row=1, column=COL_WEIGHT, value="무게(kg)")
+    ws.cell(row=1, column=COL_KEY, value="조회키")
 
     # 새 데이터 기록
     for i, row in enumerate(rows, start=2):
@@ -151,6 +191,12 @@ def write_sheet(ws, vendor_label, rows):
         ws.cell(row=i, column=5, value=row["가격(AUD)"])
         ws.cell(row=i, column=6, value=row["재고"])
         ws.cell(row=i, column=7, value=row["SKU"])
+        ws.cell(row=i, column=COL_WEIGHT, value=row["무게(kg)"])
+        ws.cell(row=i, column=COL_KEY, value=key_formula(i))
+
+    # 무게/조회키 칸은 셀러에게 안 보이게 숨김 유지
+    ws.column_dimensions["H"].hidden = True
+    ws.column_dimensions["Z"].hidden = True
 
 
 def main():
@@ -186,7 +232,8 @@ def main():
         for p in products:
             rows.extend(variant_rows(p))
 
-        print(f"[{sheet_name}] 상품 {len(products)}개, variant {len(rows)}개 반영")
+        no_weight = sum(1 for r in rows if not r["무게(kg)"])
+        print(f"[{sheet_name}] 상품 {len(products)}개, variant {len(rows)}개 반영 (무게 없는 variant {no_weight}개)")
         write_sheet(wb[sheet_name], vendor, rows)
 
     os.makedirs(args.out_dir, exist_ok=True)
