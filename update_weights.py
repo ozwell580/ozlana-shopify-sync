@@ -7,6 +7,8 @@ AUSTRALIAN STEPS - 상품 청구 무게 일괄 설정 스크립트
   3kg : 성인 미니부츠, 미들~롱 부츠
   2kg : 조끼(베스트)
   3kg : 코트, 재킷 등 그 외 의류
+  에버어그(AS UGG) 모델명만 있는 신발은 스타일 코드 번호대로 분류
+    AS2, AS5, AS7 → 2kg / AS3, AS6 → 3kg / AS4 → 4kg
 
 사용법 (GitHub Actions 환경변수)
   SHOPIFY_STORE         : xxx.myshopify.com
@@ -40,6 +42,15 @@ MINI_KG = 3.0        # 성인 미니부츠
 TALL_KG = 3.0        # 성인 미들~롱 부츠
 VEST_KG = 2.0        # 조끼(베스트)
 APPAREL_KG = 3.0     # 코트, 재킷 등 그 외 의류
+# 에버어그 스타일 코드 번호대별 무게 (키워드로 분류 안 된 상품에만 적용)
+EVER_SERIES_KG = {
+    "AS2": 2.0,  # 슬리퍼, 로퍼
+    "AS3": 3.0,  # 부츠
+    "AS4": 4.0,
+    "AS5": 2.0,  # 뮬, 신발
+    "AS6": 3.0,  # 굽 있는 부츠
+    "AS7": 2.0,  # 로퍼, 신발
+}
 DEFAULT_KG = 2.0     # 어디에도 해당 안 되는 상품 (리포트에서 꼭 확인)
 
 # ─────────────────────────────────────────────
@@ -49,7 +60,7 @@ APPAREL_PAT = r"\b(apparel|jacket|jackets|coat|coats|vest|vests|gilet|hoodie|car
 ACC_PAT = (
     r"\b(acc|accessory|accessories|scarf|scarves|hat|hats|beanie|bucket|cap|glove|gloves|"
     r"mitten|mittens|earmuff|earmuffs|headband|bag|bags|tote|pouch|clutch|backpack|"
-    r"keyring|wallet|sock|socks|charm)\b"
+    r"keyring|keyrings|charms|wallet|sock|socks|snood|snoods|cushion|cushions|case|cases)\b"
 )
 KIDS_PAT = r"\b(kid|kids|toddler|baby|infant|junior|youth|children)\b"
 TALL_PAT = r"\b(tall|long|mid|middle|knee)\b"
@@ -91,8 +102,13 @@ def classify(title, product_type, tags):
         return MINI_KG, "미니부츠"
     if has(TALL_PAT, title or ""):
         return TALL_KG, "미들~롱 부츠"
-    if has(r"\b(slipper|slippers|scuff|slide|mule|short|boot|boots|shoe|shoes|sneaker|loafer|clog|mary jane|flat|flats)\b", text):
+    if has(r"\b(slipper|slippers|scuff|scuffs|slide|slides|mule|mules|moccasin|moccasins|maryjane|mary jane|slip-on|slip on|footbed|sandal|sandals|short|boot|boots|shoe|shoes|sneaker|sneakers|loafer|loafers|clog|clogs|flat|flats)\b", text):
         return SHORT_KG, "슬리퍼/숏부츠"
+    m = re.search(r"\((AS\d)\d{2,}\w*\)\s*$", title or "", re.IGNORECASE)
+    if m:
+        series = m.group(1).upper()
+        if series in EVER_SERIES_KG:
+            return EVER_SERIES_KG[series], f"에버어그 {series} 번호대"
     return DEFAULT_KG, "미분류(기본값)"
 
 
