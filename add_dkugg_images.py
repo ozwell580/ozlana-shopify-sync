@@ -226,16 +226,20 @@ def image_from_api(url):
     return []
 
 
-def ahash(raw, size=16):
-    """간단한 이미지 지문 (중복 사진 판별용)"""
-    img = Image.open(io.BytesIO(raw)).convert("L").resize((size, size))
-    px = list(img.getdata())
-    avg = sum(px) / len(px)
-    return [p > avg for p in px]
+def ahash(raw, size=48):
+    """중복 사진 판별용 지문: 가로세로 비율 + 48x48 컬러 축소본"""
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    ratio = img.width / img.height if img.height else 0
+    return ratio, img.resize((size, size)).tobytes()
 
 
-def is_similar(h1, h2, threshold=20):
-    return sum(a != b for a, b in zip(h1, h2)) <= threshold
+def is_similar(h1, h2, max_diff=3.0):
+    """거의 똑같은 사진만 중복으로 판단 (비율이 같고, 픽셀 평균 차이가 아주 작을 때)"""
+    (r1, b1), (r2, b2) = h1, h2
+    if abs(r1 - r2) > 0.02:
+        return False
+    diff = sum(abs(a - b) for a, b in zip(b1, b2)) / len(b1)
+    return diff <= max_diff
 
 
 def norm(s):
