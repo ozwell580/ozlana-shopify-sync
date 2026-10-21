@@ -1,0 +1,29 @@
+name: DKUGG Add Size Guide Link
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "1 = 바꾸지 않고 대상만 확인, 0 = 실제로 추가"
+        required: false
+        default: "0"
+
+jobs:
+  size-guide:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Add DK UGG size guide link
+        env:
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: python add_dkugg_size_guide.py
