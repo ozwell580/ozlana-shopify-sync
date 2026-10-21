@@ -1,0 +1,40 @@
+name: DKUGG Add Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      codes:
+        description: "테스트할 상품코드 (쉼표 구분, 예: DK004A,DB017). 비우면 전체"
+        required: false
+        default: ""
+      limit:
+        description: "최대 처리 상품 수 (0 = 전체)"
+        required: false
+        default: "0"
+      max_images:
+        description: "상품당 최대 이미지 수"
+        required: false
+        default: "12"
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pillow
+
+      - name: Add DK UGG images
+        env:
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          DKUGG_CODES: ${{ github.event.inputs.codes }}
+          DKUGG_LIMIT: ${{ github.event.inputs.limit }}
+          DKUGG_MAX_IMAGES: ${{ github.event.inputs.max_images }}
+        run: python add_dkugg_images.py
