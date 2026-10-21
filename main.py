@@ -26,6 +26,12 @@ BASE_URL_OZLANA = "http://www.ozlanacms.com.au:30008"
 # 그러므로 별도로 곱하지 않고 그대로 사용한다.
 EVERUGG_GST_MULTIPLIER = 1.0
 
+# DK UGG 재고 API (인증 없음, GET 방식). 재고만 갱신하고 가격은 API에 없어서 건드리지 않는다.
+# Shopify 상품은 Variant Barcode에 DK UGG SKU id(13자리 바코드)가 들어 있어 바코드로 매칭한다.
+DKUGG_API_URL = os.environ.get(
+    "DKUGG_API_URL", "https://api.dkugg.dreamdaytech.com/api/product_stock?num=1"
+)
+
 # ================= Helper Functions =================
 def check_env_vars():
     print("=== [환경변수 검증] ===")
@@ -153,12 +159,17 @@ def get_existing_shopify_variants(shopify_headers):
             products = res.json().get("products", [])
             for p in products:
                 for v in p.get("variants", []):
+                    info = {
+                        "variant_id": v.get("id"),
+                        "inventory_item_id": v.get("inventory_item_id")
+                    }
                     sku = v.get("sku")
                     if sku:
-                        sku_map[str(sku).strip().upper()] = {
-                            "variant_id": v.get("id"),
-                            "inventory_item_id": v.get("inventory_item_id")
-                        }
+                        sku_map[str(sku).strip().upper()] = info
+                    # DK UGG 매칭용: 바코드도 따로 저장 (SKU와 겹치지 않게 BARCODE: 접두어 사용)
+                    barcode = v.get("barcode")
+                    if barcode:
+                        sku_map["BARCODE:" + str(barcode).strip().upper()] = info
 
             link_header = res.headers.get("Link")
             url = None
@@ -351,6 +362,109 @@ def build_everugg_sku_candidates(item):
 
     return candidates
 
+# ================= DK UGG Specific Sync =================
+def fetch_dkugg_products():
+    """DK UGG 전체 상품/재고 조회 (GET, 인증 없음). 서버가 느릴 때를 대비해 재시도한다."""
+    for attempt in range(3):
+        try:
+            res = requests.get(DKUGG_API_URL, timeout=120)
+            if res.status_code == 200:
+                body = res.json()
+                if isinstance(body, dict):
+                    if isinstance(body.get("products"), list):
+                        return body["products"]
+                    inner = body.get("data")
+                    if isinstance(inner, dict) and isinstance(inner.get("products"), list):
+                        return inner["products"]
+                    if isinstance(inner, list):
+                        return inner
+                print(f"❌ DK UGG 응답 형식이 예상과 다릅니다: {res.text[:300]}")
+                return []
+            print(f"DK UGG API 실패 ({attempt + 1}차 시도): {res.status_code} - {res.text[:200]}")
+        except Exception as e:
+            print(f"DK UGG API 예외 ({attempt + 1}차 시도): {e}")
+        if attempt < 2:
+            time.sleep(10 * (attempt + 1))
+    return []
+
+
+def set_shopify_inventory_retry(inventory_item_id, location_id, quantity, shopify_headers):
+    """재고 입력 + 속도 제한(429)·서버 오류 시 재시도 (DK UGG는 옵션 수가 많아서 사용)"""
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
+    url = f"https://{store_domain}/admin/api/2024-01/inventory_levels/set.json"
+    payload = {
+        "location_id": location_id,
+        "inventory_item_id": inventory_item_id,
+        "available": quantity
+    }
+    for attempt in range(4):
+        try:
+            res = requests.post(url, headers=shopify_headers, json=payload, timeout=30)
+        except Exception:
+            time.sleep(2 * (attempt + 1))
+            continue
+        if res.status_code == 200:
+            return True
+        if res.status_code == 429:
+            time.sleep(float(res.headers.get("Retry-After", 2)))
+            continue
+        if res.status_code >= 500:
+            time.sleep(2 * (attempt + 1))
+            continue
+        print(f"DK UGG 재고 입력 실패 (Item ID {inventory_item_id}): {res.status_code} - {res.text[:200]}")
+        return False
+    return False
+
+
+def sync_dkugg(shopify_variants, location_id, shopify_headers):
+    print("2-3. DK UGG API 수집 중...")
+    products = fetch_dkugg_products()
+    if not products:
+        print("-> DK UGG 재고 데이터를 가져오지 못했습니다.")
+        return
+
+    total_skus = sum(len(p.get("skus") or []) for p in products if isinstance(p, dict))
+    print(f"-> DK UGG 상품 {len(products)}개 / 옵션 {total_skus}건 수집 완료!")
+
+    dk_updated = 0
+    dk_failed = 0
+    dk_unmatched = []
+
+    for prod in products:
+        if not isinstance(prod, dict):
+            continue
+        code = str(prod.get("id", "")).strip()
+        for s in prod.get("skus") or []:
+            if not isinstance(s, dict):
+                continue
+            barcode = str(s.get("id", "")).strip().upper()
+            if not barcode:
+                continue
+
+            # 재고가 숫자가 아닌 경우(sufficient/shortage/out) 대비
+            raw_stock = s.get("stock", 0)
+            try:
+                qty = max(int(str(raw_stock).strip()), 0)
+            except ValueError:
+                qty = {"sufficient": 10, "shortage": 2, "out": 0}.get(str(raw_stock).strip().lower(), 0)
+
+            matched = shopify_variants.get("BARCODE:" + barcode) or shopify_variants.get(barcode)
+            if not matched:
+                dk_unmatched.append(f"{code}/{s.get('color')}/{s.get('size')}")
+                continue
+
+            inv_item_id = matched["inventory_item_id"]
+            if inv_item_id and set_shopify_inventory_retry(inv_item_id, location_id, qty, shopify_headers):
+                dk_updated += 1
+            else:
+                dk_failed += 1
+            time.sleep(0.3)  # Shopify REST 속도 제한(초당 2건) 여유
+
+    print(f"-> [DK UGG] 총 {dk_updated}개 옵션 재고 세팅 완료! (실패 {dk_failed}개)")
+    if dk_unmatched:
+        print(f"-> [DK UGG] Shopify에 없는 옵션 {len(dk_unmatched)}개 (예시 최대 10개): {dk_unmatched[:10]}")
+
+
 # ================= Main Sync Execution =================
 def sync_data():
     check_env_vars()
@@ -477,6 +591,11 @@ def sync_data():
             print(f"-> [EverUgg] 매칭 실패 SKU 예시 (최대 10개): {eu_unmatched[:10]}")
     else:
         print("-> EverUgg 재고 데이터를 가져오지 못했습니다.")
+
+    try:
+        sync_dkugg(shopify_variants, location_id, shopify_headers)
+    except Exception as e:
+        print(f"DK UGG 동기화 중 에러: {e}")
 
 if __name__ == "__main__":
     sync_data()
