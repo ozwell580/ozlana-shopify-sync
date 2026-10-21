@@ -1,0 +1,36 @@
+name: DKUGG API Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      num:
+        description: "재고 표시 (1: 실제 수량, 0: 재고 등급)"
+        required: false
+        default: "1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run DKUGG API test
+        env:
+          DKUGG_API_KEY: ${{ secrets.DKUGG_API_KEY }}
+          DKUGG_NUM: ${{ github.event.inputs.num }}
+        run: python dkugg_test.py
+
+      - name: Upload result JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dkugg-products
+          path: dkugg_products.json
+          if-no-files-found: ignore
