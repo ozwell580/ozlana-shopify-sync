@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       codes:
-        description: "테스트할 상품코드 (쉼표 구분, 예: DK004A,DB017). 비우면 전체"
+        description: "처리할 상품코드 (쉼표 구분, 예: DK004A,DB017). 비우면 전체"
         required: false
         default: ""
       limit:
@@ -12,9 +12,13 @@ on:
         required: false
         default: "0"
       max_images:
-        description: "상품당 최대 이미지 수"
+        description: "상품당 최대 이미지 수 (API 대표 사진 포함)"
         required: false
         default: "12"
+      replace:
+        description: "기존 이미지 지우고 다시 올리기 (1 = 예, 0 = 아니오)"
+        required: false
+        default: "0"
 
 jobs:
   images:
@@ -37,4 +41,5 @@ jobs:
           DKUGG_CODES: ${{ github.event.inputs.codes }}
           DKUGG_LIMIT: ${{ github.event.inputs.limit }}
           DKUGG_MAX_IMAGES: ${{ github.event.inputs.max_images }}
+          DKUGG_REPLACE: ${{ github.event.inputs.replace }}
         run: python add_dkugg_images.py
