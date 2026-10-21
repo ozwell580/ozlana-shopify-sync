@@ -5,15 +5,18 @@ DK UGG 상품 이미지 자동 등록 (드랍박스 -> Shopify 직접 업로드)
 - 드랍박스 공유 폴더 링크를 dl=1 로 바꿔 ZIP으로 받고, 안의 이미지를 전부 꺼냄
 - 이미지는 최대 2048px JPG로 줄인 뒤 Shopify staged upload 로 직접 올림 (GitHub 호스팅 불필요)
 - 파일 경로/이름에 색상명이 들어 있으면 그 색상 옵션(variant)에 대표 이미지로 연결함
-- 드랍박스에서 이미지를 못 받으면 DK UGG API 이미지(http)로 대신 1장 올림
+- DK UGG API 대표 이미지를 항상 맨 앞(대표 사진)에 두고, 드랍박스 이미지는 그 뒤에 붙임
+  (API 사진과 거의 같은 드랍박스 사진은 중복이라 자동으로 뺌)
 - 이미 이미지가 있는 상품은 건너뜀 (여러 번 돌려도 중복 안 생김)
+- DKUGG_REPLACE=1 이면 기존 이미지를 지우고 다시 올림 (DKUGG_CODES와 같이 쓰는 걸 권장)
 
 환경변수:
   SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET  (Client Credentials Grant, main.py와 동일)
   SHOPIFY_STORE      기본값 ugg-aus.myshopify.com
   DKUGG_CODES        테스트용: 쉼표로 코드 지정 (예: DK004A,DB017). 비우면 전체
   DKUGG_LIMIT        처리할 최대 상품 수 (0 = 제한 없음)
-  DKUGG_MAX_IMAGES   상품당 최대 이미지 수 (기본 12)
+  DKUGG_MAX_IMAGES   상품당 최대 이미지 수 (기본 12, API 대표 사진 포함)
+  DKUGG_REPLACE      1 이면 기존 이미지 삭제 후 다시 등록
 """
 
 import csv
@@ -34,6 +37,7 @@ API_VERSION = "2025-07"
 CODES = [c.strip().upper() for c in os.environ.get("DKUGG_CODES", "").split(",") if c.strip()]
 LIMIT = int(os.environ.get("DKUGG_LIMIT") or 0)
 MAX_IMAGES = int(os.environ.get("DKUGG_MAX_IMAGES") or 12)
+REPLACE = (os.environ.get("DKUGG_REPLACE") or "0").strip() in ("1", "true", "yes")
 LINKS_CSV = os.environ.get("DKUGG_LINKS_CSV", "dkugg_dropbox_links.csv")
 
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
@@ -77,13 +81,27 @@ class Shopify:
           products(first: 1, query: $q) {
             nodes {
               id handle title
-              media(first: 1) { nodes { id } }
+              media(first: 100) { nodes { id } }
               variants(first: 250) { nodes { id selectedOptions { name value } } }
             }
           }
         }"""
         nodes = self.gql(q, {"q": f"handle:{handle}"})["products"]["nodes"]
         return nodes[0] if nodes and nodes[0]["handle"] == handle else None
+
+    def delete_media(self, product_id, media_ids):
+        if not media_ids:
+            return
+        q = """
+        mutation($pid: ID!, $ids: [ID!]!) {
+          productDeleteMedia(productId: $pid, mediaIds: $ids) {
+            deletedMediaIds
+            mediaUserErrors { field message }
+          }
+        }"""
+        res = self.gql(q, {"pid": product_id, "ids": media_ids})["productDeleteMedia"]
+        if res["mediaUserErrors"]:
+            raise RuntimeError(res["mediaUserErrors"])
 
     def staged_upload(self, filename, content):
         q = """
@@ -208,6 +226,18 @@ def image_from_api(url):
     return []
 
 
+def ahash(raw, size=16):
+    """간단한 이미지 지문 (중복 사진 판별용)"""
+    img = Image.open(io.BytesIO(raw)).convert("L").resize((size, size))
+    px = list(img.getdata())
+    avg = sum(px) / len(px)
+    return [p > avg for p in px]
+
+
+def is_similar(h1, h2, threshold=20):
+    return sum(a != b for a, b in zip(h1, h2)) <= threshold
+
+
 def norm(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
@@ -238,22 +268,45 @@ def main():
                 stats["not_found"] += 1
                 failed.append((code, "상품 없음"))
                 continue
-            if product["media"]["nodes"]:
+            existing = [m["id"] for m in product["media"]["nodes"]]
+            if existing and not REPLACE:
                 print("    이미 이미지 있음 - 건너뜀")
                 stats["skip_has_image"] += 1
                 continue
+            if existing and REPLACE:
+                shop.delete_media(product["id"], existing)
+                print(f"    기존 이미지 {len(existing)}장 삭제")
 
-            files = images_from_dropbox(row.get("dropbox_link", ""))
-            source = "dropbox"
-            if not files:
-                files = image_from_api(row.get("api_image", ""))
-                source = "api"
+            # 1) API 대표 사진을 맨 앞에
+            api_files = image_from_api(row.get("api_image", ""))
+            api_hash = None
+            if api_files:
+                try:
+                    api_hash = ahash(api_files[0][1])
+                except Exception:
+                    api_hash = None
+
+            # 2) 드랍박스 사진은 뒤에 (API 사진과 같은 사진은 제외)
+            dbx_files, dup = [], 0
+            for name, raw in images_from_dropbox(row.get("dropbox_link", "")):
+                if api_hash is not None:
+                    try:
+                        if is_similar(api_hash, ahash(raw)):
+                            dup += 1
+                            continue
+                    except Exception:
+                        pass
+                dbx_files.append((name, raw))
+
+            files = (api_files + dbx_files)[:MAX_IMAGES]
+            source = f"API {len(api_files)}장 + 드랍박스 {min(len(dbx_files), MAX_IMAGES - len(api_files))}장"
+            if dup:
+                source += f" (중복 {dup}장 제외)"
             if not files:
                 print("    이미지 못 찾음")
                 stats["no_image"] += 1
                 failed.append((code, "이미지 없음"))
                 continue
-            files = files[:MAX_IMAGES]
 
             # 색상별 variant 목록
             color_variants = {}
@@ -273,7 +326,7 @@ def main():
                 names.append(name)
 
             media_ids = shop.create_media(product["id"], sources, product["title"])
-            print(f"    {source}에서 이미지 {len(media_ids)}장 등록")
+            print(f"    이미지 {len(media_ids)}장 등록: {source}")
 
             # 파일 경로에 색상명이 있으면 해당 색상 옵션에 연결 (색상별 첫 이미지)
             pairs, used = [], set()
