@@ -120,10 +120,24 @@ class Shopify:
             raise RuntimeError(res["userErrors"])
         t = res["stagedTargets"][0]
         form = {p["name"]: p["value"] for p in t["parameters"]}
-        up = requests.post(t["url"], data=form,
-                           files={"file": (filename, content, "image/jpeg")}, timeout=120)
-        if up.status_code not in (200, 201, 204):
-            raise RuntimeError(f"staged upload 실패 {up.status_code}: {up.text[:200]}")
+        # 업로드 서버 일시 오류(500/503 등)는 잠시 쉬었다가 최대 5번까지 다시 시도
+        last = ""
+        for attempt in range(5):
+            try:
+                up = requests.post(t["url"], data=form,
+                                   files={"file": (filename, content, "image/jpeg")}, timeout=120)
+                if up.status_code in (200, 201, 204):
+                    break
+                last = f"{up.status_code}: {up.text[:200]}"
+                if up.status_code < 500 and up.status_code != 429:
+                    raise RuntimeError(f"staged upload 실패 {last}")
+            except requests.RequestException as e:
+                last = str(e)[:200]
+            wait = 5 * (attempt + 1)
+            print(f"    업로드 재시도 {attempt + 1}/5 ({last[:40]}) - {wait}초 대기")
+            time.sleep(wait)
+        else:
+            raise RuntimeError(f"staged upload 실패 {last}")
         return t["resourceUrl"]
 
     def create_media(self, product_id, sources, alt):
