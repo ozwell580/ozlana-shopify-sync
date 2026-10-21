@@ -33,6 +33,24 @@ DKUGG_API_URL = os.environ.get(
 )
 
 # ================= Helper Functions =================
+# Shopify REST는 초당 2건 제한. 쓰기 요청 사이에 이만큼 쉰다.
+WRITE_INTERVAL = 0.55
+
+
+def same_price(current, new):
+    """Shopify에 이미 들어있는 가격과 새 가격이 같은지 (센트 단위 비교)"""
+    try:
+        return round(float(current), 2) == round(float(new), 2)
+    except (TypeError, ValueError):
+        return False
+
+
+def same_qty(current, new):
+    try:
+        return int(current) == int(new)
+    except (TypeError, ValueError):
+        return False
+
 def check_env_vars():
     print("=== [환경변수 검증] ===")
     if not SHOPIFY_STORE:
@@ -119,12 +137,9 @@ def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_head
         "inventory_item_id": inventory_item_id,
         "available": quantity
     }
-    try:
-        res = requests.post(url, headers=shopify_headers, json=payload)
-        return res.status_code == 200
-    except Exception as e:
-        print(f"재고 입력 실패 (Item ID {inventory_item_id}): {e}")
-        return False
+    ok = set_shopify_inventory_retry(inventory_item_id, location_id, quantity, shopify_headers)
+    time.sleep(WRITE_INTERVAL)
+    return ok
 
 
 def set_shopify_price(variant_id, price, shopify_headers):
@@ -133,13 +148,14 @@ def set_shopify_price(variant_id, price, shopify_headers):
     url = f"https://{store_domain}/admin/api/2024-01/variants/{variant_id}.json"
     payload = {"variant": {"id": variant_id, "price": f"{price:.2f}"}}
 
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             res = requests.put(url, headers=shopify_headers, json=payload, timeout=30)
         except Exception as e:
             time.sleep(2 * (attempt + 1))
             continue
         if res.status_code == 200:
+            time.sleep(WRITE_INTERVAL)
             return True
         if res.status_code == 429:
             wait = float(res.headers.get("Retry-After", 2))
@@ -180,7 +196,11 @@ def get_existing_shopify_variants(shopify_headers):
                 for v in p.get("variants", []):
                     info = {
                         "variant_id": v.get("id"),
-                        "inventory_item_id": v.get("inventory_item_id")
+                        "inventory_item_id": v.get("inventory_item_id"),
+                        # 바뀐 것만 갱신하기 위해 현재 값도 저장
+                        "price": v.get("price"),
+                        "qty": v.get("inventory_quantity"),
+                        "inventory_management": v.get("inventory_management"),
                     }
                     sku = v.get("sku")
                     if sku:
@@ -408,7 +428,7 @@ def fetch_dkugg_products():
 
 
 def set_shopify_inventory_retry(inventory_item_id, location_id, quantity, shopify_headers):
-    """재고 입력 + 속도 제한(429)·서버 오류 시 재시도 (DK UGG는 옵션 수가 많아서 사용)"""
+    """재고 입력 + 속도 제한(429)·서버 오류 시 재시도"""
     store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
     url = f"https://{store_domain}/admin/api/2024-01/inventory_levels/set.json"
     payload = {
@@ -430,7 +450,7 @@ def set_shopify_inventory_retry(inventory_item_id, location_id, quantity, shopif
         if res.status_code >= 500:
             time.sleep(2 * (attempt + 1))
             continue
-        print(f"DK UGG 재고 입력 실패 (Item ID {inventory_item_id}): {res.status_code} - {res.text[:200]}")
+        print(f"재고 입력 실패 (Item ID {inventory_item_id}): {res.status_code} - {res.text[:200]}")
         return False
     return False
 
@@ -447,6 +467,7 @@ def sync_dkugg(shopify_variants, location_id, shopify_headers):
 
     dk_updated = 0
     dk_failed = 0
+    dk_same = 0
     dk_unmatched = []
 
     for prod in products:
@@ -472,14 +493,17 @@ def sync_dkugg(shopify_variants, location_id, shopify_headers):
                 dk_unmatched.append(f"{code}/{s.get('color')}/{s.get('size')}")
                 continue
 
+            if same_qty(matched.get("qty"), qty):
+                dk_same += 1
+                continue
+
             inv_item_id = matched["inventory_item_id"]
-            if inv_item_id and set_shopify_inventory_retry(inv_item_id, location_id, qty, shopify_headers):
+            if inv_item_id and set_shopify_inventory(inv_item_id, location_id, qty, shopify_headers):
                 dk_updated += 1
             else:
                 dk_failed += 1
-            time.sleep(0.3)  # Shopify REST 속도 제한(초당 2건) 여유
 
-    print(f"-> [DK UGG] 총 {dk_updated}개 옵션 재고 세팅 완료! (실패 {dk_failed}개)")
+    print(f"-> [DK UGG] 총 {dk_updated}개 옵션 재고 세팅 완료! (변동 없음 {dk_same}개, 실패 {dk_failed}개)")
     if dk_unmatched:
         print(f"-> [DK UGG] Shopify에 없는 옵션 {len(dk_unmatched)}개 (예시 최대 10개): {dk_unmatched[:10]}")
 
@@ -517,6 +541,7 @@ def sync_data():
                 products = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
 
                 updated_count = 0
+                same_count = 0
                 store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
 
                 for prod in products:
@@ -554,14 +579,22 @@ def sync_data():
                             variant_id = matched_variant["variant_id"]
                             inv_item_id = matched_variant["inventory_item_id"]
 
-                            update_url = f"https://{store_domain}/admin/api/2024-01/variants/{variant_id}.json"
-                            update_payload = {"variant": {"id": variant_id, "price": final_price, "inventory_management": "shopify"}}
-                            requests.put(update_url, headers=shopify_headers, json=update_payload)
+                            if not (same_price(matched_variant.get("price"), final_price)
+                                    and matched_variant.get("inventory_management") == "shopify"):
+                                update_url = f"https://{store_domain}/admin/api/2024-01/variants/{variant_id}.json"
+                                update_payload = {"variant": {"id": variant_id, "price": final_price, "inventory_management": "shopify"}}
+                                try:
+                                    requests.put(update_url, headers=shopify_headers, json=update_payload, timeout=30)
+                                except Exception as e:
+                                    print(f"Ozlana 가격 입력 실패 (Variant ID {variant_id}): {e}")
+                                time.sleep(WRITE_INTERVAL)
 
-                            if inv_item_id and set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers):
+                            if same_qty(matched_variant.get("qty"), stock_num):
+                                same_count += 1
+                            elif inv_item_id and set_shopify_inventory(inv_item_id, location_id, stock_num, shopify_headers):
                                 updated_count += 1
 
-                print(f"-> [Ozlana] 총 {updated_count}개 옵션 재고 세팅 완료!")
+                print(f"-> [Ozlana] 총 {updated_count}개 옵션 재고 세팅 완료! (변동 없음 {same_count}개)")
         except Exception as e:
             print(f"Ozlana 동기화 중 에러: {e}")
 
@@ -572,6 +605,8 @@ def sync_data():
 
         eu_updated_count = 0
         eu_price_updated_count = 0
+        eu_same_count = 0
+        eu_price_same_count = 0
         eu_unmatched = []
 
         for item in everugg_data:
@@ -588,7 +623,9 @@ def sync_data():
                 inv_item_id = matched_variant["inventory_item_id"]
                 variant_id = matched_variant["variant_id"]
 
-                if inv_item_id and set_shopify_inventory(inv_item_id, location_id, qty, shopify_headers):
+                if same_qty(matched_variant.get("qty"), qty):
+                    eu_same_count += 1
+                elif inv_item_id and set_shopify_inventory(inv_item_id, location_id, qty, shopify_headers):
                     eu_updated_count += 1
 
                 # 가격도 매번 최신 원가(GST 제외) 기준으로 GST 10% 포함해서 갱신
@@ -599,13 +636,15 @@ def sync_data():
 
                 if raw_price > 0 and variant_id:
                     new_price = round(raw_price * EVERUGG_GST_MULTIPLIER, 2)
-                    if set_shopify_price(variant_id, new_price, shopify_headers):
+                    if same_price(matched_variant.get("price"), new_price):
+                        eu_price_same_count += 1
+                    elif set_shopify_price(variant_id, new_price, shopify_headers):
                         eu_price_updated_count += 1
             else:
                 eu_unmatched.append(candidates[0] if candidates else "UNKNOWN")
 
-        print(f"-> [EverUgg] 총 {eu_updated_count}개 옵션 재고 세팅 완료!")
-        print(f"-> [EverUgg] 총 {eu_price_updated_count}개 옵션 가격(GST 10% 포함) 세팅 완료!")
+        print(f"-> [EverUgg] 총 {eu_updated_count}개 옵션 재고 세팅 완료! (변동 없음 {eu_same_count}개)")
+        print(f"-> [EverUgg] 총 {eu_price_updated_count}개 옵션 가격(GST 10% 포함) 세팅 완료! (변동 없음 {eu_price_same_count}개)")
         if eu_unmatched:
             print(f"-> [EverUgg] 매칭 실패 SKU 예시 (최대 10개): {eu_unmatched[:10]}")
     else:
