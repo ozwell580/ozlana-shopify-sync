@@ -87,18 +87,28 @@ def get_shopify_location_id(shopify_headers):
     store_domain = SHOPIFY_STORE.replace("https://", "").strip("/") if SHOPIFY_STORE else ""
     url = f"https://{store_domain}/admin/api/2024-01/locations.json"
 
-    try:
-        res = requests.get(url, headers=shopify_headers)
-        if res.status_code == 200:
-            locations = res.json().get("locations", [])
-            if locations:
-                loc_id = locations[0]["id"]
-                print(f"-> Location ID 조회 성공: {loc_id}")
-                return loc_id
-        else:
+    # 다른 작업과 겹쳐 속도 제한(429)에 걸리면 잠깐 기다렸다가 다시 시도
+    for attempt in range(6):
+        try:
+            res = requests.get(url, headers=shopify_headers, timeout=30)
+            if res.status_code == 200:
+                locations = res.json().get("locations", [])
+                if locations:
+                    loc_id = locations[0]["id"]
+                    print(f"-> Location ID 조회 성공: {loc_id}")
+                    return loc_id
+                print("[Location API] 위치 정보가 비어 있습니다.")
+                return None
+            if res.status_code == 429 or res.status_code >= 500:
+                wait = float(res.headers.get("Retry-After", 2)) + attempt * 2
+                print(f"[Location API] {res.status_code} - {wait:.0f}초 후 재시도 ({attempt + 1}/6)")
+                time.sleep(wait)
+                continue
             print(f"[Location API 에러 상세]: {res.text}")
-    except Exception as e:
-        print(f"Location ID 조회 중 예외 발생: {e}")
+            return None
+        except Exception as e:
+            print(f"Location ID 조회 중 예외 발생: {e}")
+            time.sleep(2 * (attempt + 1))
     return None
 
 def set_shopify_inventory(inventory_item_id, location_id, quantity, shopify_headers):
@@ -149,12 +159,21 @@ def get_existing_shopify_variants(shopify_headers):
     sku_map = {}
     url = f"https://{store_domain}/admin/api/2024-01/products.json?limit=250"
 
+    retries = 0
     while url:
         try:
-            res = requests.get(url, headers=shopify_headers)
+            res = requests.get(url, headers=shopify_headers, timeout=60)
+            if (res.status_code == 429 or res.status_code >= 500) and retries < 6:
+                retries += 1
+                wait = float(res.headers.get("Retry-After", 2)) + retries * 2
+                print(f"[Product API] {res.status_code} - {wait:.0f}초 후 재시도 ({retries}/6)")
+                time.sleep(wait)
+                continue
             if res.status_code != 200:
                 print(f"[Product API 에러 응답]: {res.status_code} - {res.text}")
                 break
+            retries = 0
+            time.sleep(0.5)  # 페이지 사이 간격 (초당 2건 제한 여유)
 
             products = res.json().get("products", [])
             for p in products:
