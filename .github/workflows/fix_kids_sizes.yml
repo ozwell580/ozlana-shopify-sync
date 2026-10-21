@@ -1,0 +1,33 @@
+name: Fix Kids Sizes
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true = 미리보기만 / false = 실제 수정"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  fix-kids-sizes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run fix_kids_sizes.py
+        env:
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python fix_kids_sizes.py
