@@ -1,0 +1,34 @@
+name: EverUgg Stock Dump
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: pip install requests
+
+      - name: Download EverUgg stock
+        env:
+          EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
+          EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
+          EVERUGG_BASE_URL: ${{ secrets.EVERUGG_BASE_URL }}
+        run: python everugg_stock_dump.py
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: everugg_stock_result
+          path: everugg_stock.json
+          if-no-files-found: warn
