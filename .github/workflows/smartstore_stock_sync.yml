@@ -58,6 +58,6 @@ jobs:
         with:
           name: smartstore_stock_${{ steps.time.outputs.stamp }}
           path: |
-            smartstore_stock_upload.xlsx
+            smartstore_stock_upload*.xlsx
             smartstore_stock_report.txt
           retention-days: 7
