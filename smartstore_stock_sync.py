@@ -33,6 +33,7 @@ import openpyxl
 
 FORMS_DIR = os.environ.get("FORMS_DIR", "forms")
 OUT_FILE = "smartstore_stock_upload.xlsx"
+UPLOAD_LIMIT = 450  # 스마트스토어 수정양식 업로드 최대 500개
 REPORT_FILE = "smartstore_stock_report.txt"
 
 SAFETY_STOCK = int(os.environ.get("SAFETY_STOCK", "0"))  # 공급처 재고에서 빼고 올릴 수량
@@ -661,19 +662,28 @@ def main():
             R["중복 등록 상품(확인 권장)"].append(f"[{brand}] {code}  {n}개")
 
     # 업로드 파일 저장: 첫 번째 양식의 1~2행(제목)을 그대로 쓰고 데이터만 채움
-    wb = openpyxl.load_workbook(files[0])
-    ws = wb.active
-    ws.delete_rows(3, ws.max_row)
-    for r in out_rows:
-        ws.append(r)
-    wb.save(OUT_FILE)
+    # 스마트스토어 수정양식 업로드는 한 번에 500개까지라 450개씩 나눠서 저장
+    for old in glob.glob("smartstore_stock_upload*.xlsx"):
+        os.remove(old)
+    out_files = []
+    chunks = [out_rows[i:i + UPLOAD_LIMIT] for i in range(0, len(out_rows), UPLOAD_LIMIT)] or [[]]
+    for n, chunk in enumerate(chunks, start=1):
+        wb = openpyxl.load_workbook(files[0])
+        ws = wb.active
+        ws.delete_rows(3, ws.max_row)
+        for r in chunk:
+            ws.append(r)
+        name = OUT_FILE if len(chunks) == 1 else OUT_FILE.replace(".xlsx", f"_{n}.xlsx")
+        wb.save(name)
+        out_files.append(f"{name} ({len(chunk)}개)")
 
     order = ["사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
              "추정 매칭 색상(확인 권장)", "중복 등록 상품(확인 권장)",
              "간편 입력 옵션(엑셀 수정 불가, 업로드 제외)", "단독형 2단 옵션(상품 재고만 갱신)",
              "단독형 -> 조합형 전환", "판매자 상품코드 채움", "기타 브랜드(업로드 제외)"]
     cnt = collections.Counter(r[col["브랜드"]] for r in out_rows)
-    summary = [f"업로드 파일 상품 수: {len(out_rows)}  ({', '.join(f'{k} {v}' for k, v in cnt.items())})",
+    summary = [f"업로드 파일: {len(out_files)}개 (" + ", ".join(out_files) + ")",
+               f"업로드 파일 상품 수: {len(out_rows)}  ({', '.join(f'{k} {v}' for k, v in cnt.items())})",
                f"안전재고: {SAFETY_STOCK}"]
     summary += [f"{k}: {len(R[k])}" for k in order if R[k]]
     body = []
@@ -684,7 +694,7 @@ def main():
     with open(REPORT_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(summary) + "\n" + "\n".join(body) + "\n")
     print("\n".join(summary))
-    print(f"\n완료: {OUT_FILE}, {REPORT_FILE}")
+    print("\n완료:", ", ".join(out_files), REPORT_FILE)
 
 
 if __name__ == "__main__":
