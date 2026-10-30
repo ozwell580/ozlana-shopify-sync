@@ -19,6 +19,8 @@
   - 간편 입력 옵션 상품(옵션형태 공란)은 엑셀 수정이 안 돼서 업로드 파일에서 제외
   - 판매자 상품코드가 빈 상품은 상품명 속 코드로 채움
   - 같은 상품번호가 여러 파일에 있으면 한 번만 처리
+  - 유료배송(1개마다 부과): 판매가에서 배송비 몫을 빼고 배송비로 받음 (롱부츠·가방·아우터 17,000 / 미니·숏·앵클부츠·플랫폼·스니커즈 14,000 / 키링·참·펜던트 9,900 / 그 외 11,000원)
+    이미 바뀐 상품은 다시 빼지 않음. 끄려면 PAID_SHIPPING=0
 """
 
 import glob
@@ -112,6 +114,78 @@ KIDS_EU_TO_AU = {"21-22": "4-5", "23-25": "6-7", "26-28": "8-10", "29-32": "11-1
 BABY_MONTHS = {"S": "0-6 M", "M": "6-12 M", "L": "12-18 M", "XL": "18-24 M"}
 
 CODE_RE = re.compile(r"\b(D[A-Z]\d+[A-Z]?|AS[A-Z]?\d+[A-Z]*|\d{5})\b")
+
+# ================================================================ 유료배송 (1개마다 배송비 부과)
+# 판매가에서 배송비만큼 빼고 그 금액을 배송비로 받음 -> 고객 결제 총액은 그대로
+#   17,000원 : 롱·미들 부츠, 가방, 아우터(자켓·코트·무스탕·베스트·패딩)
+#   14,000원 : 미니·숏·앵클 부츠(남성·키즈 포함), 플랫폼(슬리퍼·샌들·로퍼 등), 스니커즈, 운동화
+#   11,000원 : 그 외 (일반 슬리퍼·샌들·모자·장갑·머플러·부티·의류 등)
+#    9,900원 : 키링, 가방 참, 펜던트
+PAID_SHIPPING = os.environ.get("PAID_SHIPPING", "1") == "1"
+SHIP_FEE_BIG = 17000
+SHIP_FEE_MID = 14000
+SHIP_FEE_LOW = 11000
+SHIP_FEE_CHARM = 9900
+SHIP_CHARM = re.compile(r"키링|백참|가방참|가방 참|펜던트")
+SHIP_CHARM_WORD = re.compile(r"참\b")
+SHIP_SHOE_WORD = re.compile(r"로퍼|뮬|슬리퍼|샌들|부츠|스니커즈|클로그|슈즈|슬립온|메리제인")
+SHIP_LOW_STRONG = re.compile(r"관리|스프레이|양말|삭스|부티|더스트백|신발주머니|부츠커버|레그워머")
+SHIP_BOOT = re.compile(r"부츠|부처|숏어그|롱어그|아웃도어어그|워커")
+SHIP_LONG_BOOT = re.compile(r"롱|미들|미디|톨\s|톨부츠|니하이|하이\s?부츠")
+SHIP_OUTER = re.compile(r"자켓|재킷|코트|점퍼|패딩|베스트|조끼")
+SHIP_MID = re.compile(r"플랫폼|스니커즈|운동화")
+SHIP_BAG = re.compile(r"가방|백팩|(숄더|크로스|토트|버킷|호보|미니|클러치|체인|새들|쇼퍼|더플)\s?백|클러치|토트")
+SHIP_LOW_ACC = re.compile(r"모자|햇|장갑|미튼|머플러|목도리|귀마개|비니|캡\b|볼캡")
+
+
+def ship_fee_for(name):
+    n = str(name or "")
+    if SHIP_CHARM.search(n) or (SHIP_CHARM_WORD.search(n) and not SHIP_SHOE_WORD.search(n)):
+        return SHIP_FEE_CHARM
+    if SHIP_LOW_STRONG.search(n):
+        return SHIP_FEE_LOW
+    if SHIP_BOOT.search(n):
+        if "미니" in n or not SHIP_LONG_BOOT.search(n):
+            return SHIP_FEE_MID
+        return SHIP_FEE_BIG
+    if SHIP_OUTER.search(n):
+        return SHIP_FEE_BIG
+    if SHIP_MID.search(n):
+        return SHIP_FEE_MID
+    if SHIP_LOW_ACC.search(n):
+        return SHIP_FEE_LOW
+    if SHIP_BAG.search(n):
+        return SHIP_FEE_BIG
+    return SHIP_FEE_LOW
+
+
+def apply_paid_shipping(r, col, R):
+    """무료/유료 배송 상품을 '수량별(1개마다)' 유료배송으로 바꾸고 판매가에서 배송비만큼 뺌.
+    기존 배송비는 판매가에 다시 더한 뒤 새 배송비를 빼므로 고객 총액은 그대로.
+    이미 기준 금액으로 바뀐 상품은 그대로 둠."""
+    typ = str(r[col["배송비유형"]] or "").strip()
+    old_fee = to_int(r[col["기본배송비"]])
+    fee = ship_fee_for(r[col["상품명"]])
+    if typ == "수량별" and old_fee == fee and str(r[col["수량별부과-수량"]] or "").strip() in ("1", "1.0"):
+        return
+    if typ not in ("무료", "유료", "수량별"):
+        R["배송비 유형 확인 필요(변경 안 함)"].append(f"{r[col['상품번호']]}  {typ}  {r[col['상품명']]}")
+        return
+    if typ == "무료":
+        old_fee = 0
+    price = to_int(r[col["판매가"]])
+    new_price = price + old_fee - fee
+    if new_price < 1000:
+        R["배송비 유형 확인 필요(변경 안 함)"].append(f"{r[col['상품번호']]}  판매가 {price}원이 너무 낮음  {r[col['상품명']]}")
+        return
+    r[col["판매가"]] = new_price
+    r[col["배송비유형"]] = "수량별"
+    r[col["기본배송비"]] = fee
+    r[col["배송비 결제방식"]] = "선결제"
+    r[col["조건부무료-\n상품판매가 합계"]] = None
+    r[col["수량별부과-수량"]] = 1
+    R["유료배송 전환"].append(f"{r[col['판매자 상품코드']]}  판매가 {price:,} -> {new_price:,}  배송비 {fee:,}"
+                         + (f" (기존 배송비 {old_fee:,})" if old_fee else "") + f"  {r[col['상품명']]}")
 
 
 # ================================================================ 공급처 데이터
@@ -657,6 +731,10 @@ def main():
         r[col["재고수량"]] = sum(int(x) for x in qtys)
         out_rows.append(r)
 
+    if PAID_SHIPPING:
+        for r in out_rows:
+            apply_paid_shipping(r, col, R)
+
     for (brand, code), n in dup_names.items():
         if n > 1:
             R["중복 등록 상품(확인 권장)"].append(f"[{brand}] {code}  {n}개")
@@ -683,7 +761,7 @@ def main():
         wb.save(name)
         out_files.append(f"{name} ({len(chunk)}개)")
 
-    order = ["사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
+    order = ["유료배송 전환", "배송비 유형 확인 필요(변경 안 함)", "사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
              "추정 매칭 색상(확인 권장)", "중복 등록 상품(확인 권장)",
              "간편 입력 옵션(엑셀 수정 불가, 업로드 제외)", "단독형 2단 옵션(상품 재고만 갱신)",
              "단독형 -> 조합형 전환", "판매자 상품코드 채움", "기타 브랜드(업로드 제외)"]
