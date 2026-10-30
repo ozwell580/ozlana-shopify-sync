@@ -1,0 +1,63 @@
+name: Smartstore Stock File (DK + EverUgg)
+
+# 시드니 시간 오전 9시, 오후 4시 전에 업로드 파일을 만들어 둡니다.
+# GitHub 예약은 UTC 기준이라 서머타임(AEDT)/일반시간(AEST) 둘 다 예약해 두고,
+# 'Check Sydney time' 단계에서 시드니 시간이 08시/15시일 때만 실행합니다.
+#   AEDT(UTC+11): 21:30 UTC = 08:30,  04:30 UTC = 15:30
+#   AEST(UTC+10): 22:30 UTC = 08:30,  05:30 UTC = 15:30
+on:
+  schedule:
+    - cron: "30 21,22 * * *"
+    - cron: "30 4,5 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Sydney time
+        id: time
+        run: |
+          HOUR=$(TZ=Australia/Sydney date +%H)
+          echo "시드니 현재 시각: $(TZ=Australia/Sydney date '+%Y-%m-%d %H:%M')"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$HOUR" = "08" ] || [ "$HOUR" = "15" ]; then
+            echo "run=yes" >> $GITHUB_OUTPUT
+          else
+            echo "run=no" >> $GITHUB_OUTPUT
+            echo "지금은 실행 시간이 아니라 건너뜁니다 (서머타임 중복 예약)."
+          fi
+          echo "stamp=$(TZ=Australia/Sydney date +%Y%m%d_%H%M)" >> $GITHUB_OUTPUT
+
+      - name: Checkout
+        if: steps.time.outputs.run == 'yes'
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: steps.time.outputs.run == 'yes'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        if: steps.time.outputs.run == 'yes'
+        run: pip install requests openpyxl
+
+      - name: Build upload file
+        if: steps.time.outputs.run == 'yes'
+        env:
+          EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
+          EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
+          EVERUGG_BASE_URL: ${{ secrets.EVERUGG_BASE_URL }}
+        run: |
+          rm -f dk_stock.json everugg_stock.json
+          python smartstore_stock_sync.py
+
+      - name: Upload result
+        if: steps.time.outputs.run == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartstore_stock_${{ steps.time.outputs.stamp }}
+          path: |
+            smartstore_stock_upload.xlsx
+            smartstore_stock_report.txt
+          retention-days: 7
