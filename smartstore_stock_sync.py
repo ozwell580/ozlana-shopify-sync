@@ -667,12 +667,18 @@ def main():
         os.remove(old)
     out_files = []
     chunks = [out_rows[i:i + UPLOAD_LIMIT] for i in range(0, len(out_rows), UPLOAD_LIMIT)] or [[]]
+    src = openpyxl.load_workbook(files[0]).active
+    head_rows = [list(r) for r in src.iter_rows(min_row=1, max_row=2, values_only=True)]
+    head_merges = [str(m) for m in src.merged_cells.ranges if m.max_row <= 2]
     for n, chunk in enumerate(chunks, start=1):
-        wb = openpyxl.load_workbook(files[0])
+        # 양식 파일을 그대로 쓰면 빈 서식 행이 남아서 "500개 초과" 오류가 나므로 새 파일에 값만 씀
+        wb = openpyxl.Workbook()
         ws = wb.active
-        ws.delete_rows(3, ws.max_row)
-        for r in chunk:
+        ws.title = src.title
+        for r in head_rows + chunk:
             ws.append(r)
+        for m in head_merges:
+            ws.merge_cells(m)
         name = OUT_FILE if len(chunks) == 1 else OUT_FILE.replace(".xlsx", f"_{n}.xlsx")
         wb.save(name)
         out_files.append(f"{name} ({len(chunk)}개)")
