@@ -1,4 +1,4 @@
-name: Smartstore Stock File (DK + EverUgg)
+name: Smartstore Stock File (DK + EverUgg + Ozwear + Ozlana)
 
 # 시드니 시간 오전 9시, 오후 4시 전에 업로드 파일을 만들어 둡니다.
 # GitHub 예약은 UTC 기준이라 서머타임(AEDT)/일반시간(AEST) 둘 다 예약해 두고,
@@ -48,6 +48,12 @@ jobs:
           EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
           EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
           EVERUGG_BASE_URL: ${{ secrets.EVERUGG_BASE_URL }}
+          OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
+          OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
+          OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         run: |
           rm -f dk_stock.json everugg_stock.json
           python smartstore_stock_sync.py
