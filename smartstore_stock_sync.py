@@ -74,6 +74,8 @@ SHOPIFY_STORE = os.environ.get("SHOPIFY_STORE")
 SHOPIFY_CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID")
 SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET")
 OZ_EU_OFFSET = int(os.environ.get("OZ_EU_OFFSET", "30"))  # AU5 + 30 = EU35
+# 오즈웨어 유아 사이즈(발 길이) -> 스마트스토어 표기
+OZ_BABY_CM = {"12": "M", "13": "L", "14": "XL", "16": "XXL"}
 
 BRAND_DK = "DK어그"
 BRAND_EU = "에버어그"
@@ -132,7 +134,7 @@ COLOR_MAP = {
     "캥거루": "Kangaroo", "회색양": "Grey Sheep", "흰색양": "White Sheep",
     # 오즈웨어·오즈라나
     "다크초콜렛": "Dark Chocolate", "다크초콜릿": "Dark Chocolate", "아이보리블랙": "Ivory/Black",
-    "탄": "Tan", "히코리": "Hickory", "머쉬룸": "Mushroom", "머시룸": "Mushroom",
+    "탄": "Tan", "히코리": "Hickory", "머쉬룸": "Mushroom", "머시룸": "Mushroom", "모카": "Mocha",
 }
 
 KIDS_EU_TO_AU = {"21-22": "4-5", "23-25": "6-7", "26-28": "8-10", "29-32": "11-12", "33-34": "13-2"}
@@ -328,6 +330,12 @@ def oz_size(size):
         if eu:
             return "EU" + eu[0].replace("EU", "")
         u = parts[0] if parts else ""
+    m = re.fullmatch(r"(?:\d{1,2}M/)?(\d{1,2})L", u)  # 오즈웨어 '5L', '3M/5L' (L = 여성 AU)
+    if m:
+        return f"EU{int(m.group(1)) + OZ_EU_OFFSET}"
+    m = re.fullmatch(r"UPTO(\d+)CM", u)  # 오즈웨어 유아 'Up to 12cm'
+    if m and m.group(1) in OZ_BABY_CM:
+        return OZ_BABY_CM[m.group(1)]
     m = re.fullmatch(r"(AU|W|US)?(\d{1,2})", u)
     if m and 3 <= int(m.group(2)) <= 13 and m.group(1) != "US":
         return f"EU{int(m.group(2)) + OZ_EU_OFFSET}"
@@ -741,7 +749,11 @@ def main():
 
         # 오즈: 공급처에서 못 찾은 상품은 재고 그대로 (배송비 전환만)
         if not skus and is_oz:
-            R["오즈 못 찾은 상품(재고 유지)"].append(f"[{brand}] {code}  {name}")
+            digits = re.sub(r"\D", "", code)
+            near = sorted(k for k in sup[brand] if digits and digits in k)[:8]
+            R["오즈 못 찾은 상품(재고 유지)"].append(f"[{brand}] {code}  {name}"
+                                               + (f"  (공급처 비슷한 코드: {', '.join(near)})" if near else
+                                                  f"  (공급처 상품 {len(sup[brand])}개 중 없음)"))
             out_rows.append(r)
             out_brands.append(brand)
             continue
