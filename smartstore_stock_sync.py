@@ -135,7 +135,15 @@ COLOR_MAP = {
     # 오즈웨어·오즈라나
     "다크초콜렛": "Dark Chocolate", "다크초콜릿": "Dark Chocolate", "아이보리블랙": "Ivory/Black",
     "탄": "Tan", "히코리": "Hickory", "머쉬룸": "Mushroom", "머시룸": "Mushroom", "모카": "Mocha",
+    "머스타드시드": "Mustard Seed", "아프리콧": "Apricot", "애프리컷": "Apricot", "네이비": "Navy",
+    "코냑": "Cognac", "샌드베이지": "Sand Beige", "에어리블루": "Airy Blue",
 }
+
+# 공급처 색상 표기 오타/별칭 (영문, norm_en 기준) -> 올바른 표기
+EN_COLOR_ALIAS = {"chestrnut": "chestnut", "chesnut": "chestnut", "choclate": "chocolate",
+                  "grey": "grey", "gray": "grey", "lvory": "ivory"}
+# 한글 색상 뒤에 붙는 수식어 -> 영문 (예: 머쉬룸 네이처 퍼 -> Mushroom Nature Fur)
+KO_COLOR_SUFFIX = {"네이처퍼": "Nature Fur", "내추럴퍼": "Nature Fur"}
 
 KIDS_EU_TO_AU = {"21-22": "4-5", "23-25": "6-7", "26-28": "8-10", "29-32": "11-12", "33-34": "13-2"}
 BABY_MONTHS = {"S": "0-6 M", "M": "6-12 M", "L": "12-18 M", "XL": "18-24 M"}
@@ -333,6 +341,9 @@ def oz_size(size):
     m = re.fullmatch(r"(?:\d{1,2}M/)?(\d{1,2})L", u)  # 오즈웨어 '5L', '3M/5L' (L = 여성 AU)
     if m:
         return f"EU{int(m.group(1)) + OZ_EU_OFFSET}"
+    m = re.fullmatch(r"W(\d{1,2})/M\d{1,2}", u)  # 남녀공용 'W5/M3' -> 여성 사이즈 기준
+    if m:
+        return f"EU{int(m.group(1)) + OZ_EU_OFFSET}"
     m = re.fullmatch(r"UPTO(\d+)CM", u)  # 오즈웨어 유아 'Up to 12cm'
     if m and m.group(1) in OZ_BABY_CM:
         return OZ_BABY_CM[m.group(1)]
@@ -526,14 +537,36 @@ def norm_ko(s):
 
 
 def norm_en(s):
-    return re.sub(r"[\s\-/()&]+", "", str(s or "")).lower()
+    t = re.sub(r"[\s\-/()&]+", "", str(s or "")).lower()
+    for a, b in EN_COLOR_ALIAS.items():
+        t = t.replace(a, b)
+    return t
+
+
+def ko_color_to_en(ko):
+    """한글 색상 -> 영문. 사전에 없으면 '/'로 나뉜 조합색(머스타드 시드/아이보리)과
+    '네이처 퍼' 같은 수식어를 나눠서 번역. 못 하면 None"""
+    k = norm_ko(ko)
+    if not k:
+        return None
+    if k in COLOR_MAP:
+        return COLOR_MAP[k]
+    for suf, en_suf in KO_COLOR_SUFFIX.items():
+        if k.endswith(suf) and len(k) > len(suf):
+            base = ko_color_to_en(k[:-len(suf)])
+            return f"{base} {en_suf}" if base else None
+    parts = [p for p in re.split(r"[/]+", str(ko)) if p.strip()]
+    if len(parts) > 1:
+        ens = [ko_color_to_en(p) for p in parts]
+        return "/".join(ens) if all(ens) else None
+    return None
 
 
 def find_color(skus, ko, allow_guess=True, allow_single=True):
     """한글 색상 -> 공급처 색상. (색상, 추정여부)
     allow_single: 공급처 색상이 하나뿐이면 그 색으로 봄 (오즈는 영문이 다르면 쓰지 않음)"""
     colors = sorted({str(s["color"]) for s in skus})
-    en = COLOR_MAP.get(norm_ko(ko))
+    en = ko_color_to_en(ko)
     if en:
         for c in colors:
             if norm_en(c) == norm_en(en):
@@ -572,9 +605,16 @@ def api_size_keys(size):
     return keys
 
 
-def store_size_keys(label):
+def store_size_keys(label, oz=False):
     s = str(label or "").strip().upper().replace(" ", "")
     keys = set()
+    if oz:
+        # 오즈 스마트스토어 표기: 'US5(230mm)', 'W5/M3(230mm)', 'AU5' -> 숫자는 AU(=공급처) 사이즈
+        # 공급처 쪽은 oz_size()로 AU+OZ_EU_OFFSET = EU 로 바뀌어 있으므로 같은 EU 키를 만든다
+        head0 = re.sub(r"\(.*", "", s)
+        m = re.fullmatch(r"(?:US|AU|W)(\d{1,2})(?:/M\d{1,2})?", head0)
+        if m and 3 <= int(m.group(1)) <= 13:
+            keys.add(f"EU{int(m.group(1)) + OZ_EU_OFFSET}")
     head = re.sub(r"\(.*", "", s)
     inner = re.search(r"\((.*)\)", s)
     keys.add(head)
@@ -611,8 +651,8 @@ def is_size_label(v):
         head))
 
 
-def size_stock(skus, color, label):
-    keys = store_size_keys(label)
+def size_stock(skus, color, label, oz=False):
+    keys = store_size_keys(label, oz)
     hits = [s for s in skus if (color is None or s["color"] == color) and keys & api_size_keys(s["size"])]
     if not hits:
         pool = [s for s in skus if color is None or s["color"] == color]
@@ -786,7 +826,7 @@ def main():
             optname = (lines(r, "옵션명") or ["컬러"])[0]
             if is_oz:
                 if "사이즈" in optname:
-                    miss = [o for o in opts if not size_stock(skus, None, o)[1]]
+                    miss = [o for o in opts if not size_stock(skus, None, o, oz=True)[1]]
                 else:
                     miss = [o for o in opts if find_color(skus, o, allow_single=False)[0] is None]
                 if miss:
@@ -798,7 +838,7 @@ def main():
             qtys = []
             if "사이즈" in optname:
                 for o in opts:
-                    q, ok = size_stock(skus, None, o)
+                    q, ok = size_stock(skus, None, o, oz=is_oz)
                     if not ok:
                         R["공급처에 없는 사이즈(품절)"].append(f"{code}  '{o}'")
                     qtys.append(final_qty(q))
@@ -963,7 +1003,7 @@ def main():
             if s is None:
                 q = sum(x["stock"] for x in skus if en is None or x["color"] == en)
             else:
-                q, found = size_stock(skus, en, s)
+                q, found = size_stock(skus, en, s, oz=is_oz)
                 if not found and is_oz:
                     if use != "N":
                         sizes = ", ".join(sorted({str(x.get("raw_size", x["size"])) for x in skus
