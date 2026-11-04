@@ -134,6 +134,8 @@ COLOR_MAP = {
     "라이트블루체크": "Light Blue Check", "라이트핑크체크": "Light Pink Check",
     "레드체크": "Red Check", "베이지체크": "Beige Check", "블랙체크": "Black Check",
     "인디고카멜체크": "Indigo Camel Check", "카멜체크": "camel check", "카키체크": "Khaki Check",
+    "그레이시블루체크": "Grayish Blue Check", "프라신체크": "Prasine Check", "오렌지레드체크": "Orange Red Check",
+    "베이지그레이체크": "Beige Grey Check", "블랙그레이체크": "Black Grey Check",
     # 동물 키링
     "곰발바닥": "Bear Paw", "북극곰": "Polar Bear", "판다": "Panda", "코알라": "Koala",
     "캥거루": "Kangaroo", "회색양": "Grey Sheep", "흰색양": "White Sheep",
@@ -152,7 +154,7 @@ COLOR_MAP = {
     "클라우드": "Cloud", "펄리버": "Pearl River", "애쉬": "Ash", "메탈릭핑크": "Metallic Pink",
     "메탈릭브론즈": "Metallic Bronze", "초코": "Chocolate",
     "크리미그레이": "Creamy Grey", "오트밀크": "Oat Milk", "내추럴베이지": "Natural Beige",
-    "내추럴브라운": "Natural Brown", "페일마브": "Pale Mauve", "채스트넛": "Chestnut", "캐러멜": "Caramel",
+    "내추럴브라운": "Natural Brown", "페일마브": "Pale Mauve", "채스트넛": "Chestnut", "캐러멜": "Caramel", "엠버": "Umber",
 }
 
 # 공급처 색상 표기 오타/별칭 (영문, norm_en 기준) -> 올바른 표기
