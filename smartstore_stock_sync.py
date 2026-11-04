@@ -172,12 +172,19 @@ OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX"}
 # 오즈라나 S/M/L 상품 -> 공급처 4#/5#/6#
 OZ_SML_CODES = {f"OZ80{n:02d}" for n in range(1, 15)}  # OZ8001~OZ8014
 OZ_SML_MAP = {"S": "AU4", "M": "AU5", "L": "AU6"}
+# 상품별 사이즈 연결: {상품코드: {스마트스토어 사이즈(괄호 앞): 공급처 사이즈}}
+OZ_SIZE_ALIAS = {
+    "OB750": {"S": "6-7M", "M": "8-9M", "L": "10-11M", "XL": "12-13M"},
+}
 
 
 def oz_store_size(code, label):
     k = str(label or "").strip().upper()
     if code in OZ_SML_CODES and k in OZ_SML_MAP:
         return OZ_SML_MAP[k]
+    head = re.sub(r"\(.*", "", k).replace(" ", "")
+    if head in OZ_SIZE_ALIAS.get(code, {}):
+        return OZ_SIZE_ALIAS[code][head]
     return label
 
 
@@ -203,9 +210,9 @@ SHIP_SHOE_WORD = re.compile(r"로퍼|뮬|슬리퍼|샌들|부츠|스니커즈|�
 SHIP_LOW_STRONG = re.compile(r"관리|스프레이|양말|삭스|부티|더스트백|신발주머니|부츠커버|레그워머")
 SHIP_BOOT = re.compile(r"부츠|부처|숏어그|롱어그|아웃도어어그|워커")
 SHIP_LONG_BOOT = re.compile(r"롱|미들|미디|톨\s|톨부츠|니하이|하이\s?부츠")
-SHIP_OUTER = re.compile(r"자켓|재킷|코트|점퍼|패딩|베스트|조끼")
+SHIP_OUTER = re.compile(r"자켓|재킷|코트|점퍼|패딩(?!턴)|베스트|조끼")
 SHIP_MID = re.compile(r"플랫폼|스니커즈|운동화")
-SHIP_BAG = re.compile(r"가방|백팩|(숄더|크로스|토트|버킷|호보|미니|클러치|체인|새들|쇼퍼|더플|핸들|바디)\s?백|클러치|토트")
+SHIP_BAG = re.compile(r"가방|백팩|(숄더|크로스|토트|버킷|호보|미니|클러치|체인|새들|쇼퍼|더플|핸들|핸드|바디)\s?백|클러치|토트|캐리어|플랩|\s백(\s|$)")
 SHIP_LOW_ACC = re.compile(r"모자|햇|장갑|미튼|머플러|목도리|귀마개|비니|캡\b|볼캡")
 
 
