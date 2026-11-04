@@ -141,12 +141,22 @@ COLOR_MAP = {
     "탄": "Tan", "히코리": "Hickory", "머쉬룸": "Mushroom", "머시룸": "Mushroom", "모카": "Mocha",
     "머스타드시드": "Mustard Seed", "아프리콧": "Apricot", "애프리컷": "Apricot", "네이비": "Navy",
     "코냑": "Cognac", "샌드베이지": "Sand Beige", "에어리블루": "Airy Blue",
+    "도브": "Dove", "더스티핑크": "Dusty Pink", "다크체스트넛": "Dark Chestnut", "체리": "Cherry",
+    "월넛": "Walnut", "토마토": "Tomato", "차콜": "Charcoal", "블루베이퍼": "Blue Vapor",
+    "스틸그레이": "Steel Grey", "세이지": "Sage", "내추럴": "Natural", "시드니그레이": "Sydney Grey",
+    "아몬드": "Almond", "글리터그레이": "Glitter Grey", "글리터핑크": "Glitter Pink",
+    "샌드캐슬": "Sandcastle", "포레스트": "Forest", "고트": "Goat", "스톤그레이": "Stone Grey",
+    "스톰그레이": "Storm Grey", "크리미": "Creamy", "오이스터베이지": "Oyster Beige", "젠블루": "Zen Blue",
+    "나이트셰이드": "Nightshade", "페일모브": "Pale Mauve", "신더": "Cinder", "시걸": "Seagull",
+    "클라우드": "Cloud", "펄리버": "Pearl River", "애쉬": "Ash", "메탈릭핑크": "Metallic Pink",
+    "메탈릭브론즈": "Metallic Bronze", "초코": "Chocolate",
 }
 
 # 공급처 색상 표기 오타/별칭 (영문, norm_en 기준) -> 올바른 표기
 EN_COLOR_ALIAS = {"chestrnut": "chestnut", "chesnut": "chestnut", "choclate": "chocolate",
                   "grey": "grey", "gray": "grey", "lvory": "ivory",
-                  "coffee": "coffe", "bluelight": "lightblue"}
+                  "coffee": "coffe", "bluelight": "lightblue",
+                  "caramal": "caramel", "mocca": "mocha", "chestnutchocolate": "chestnutchoc"}
 # 한글 색상 뒤에 붙는 수식어 -> 영문 (예: 머쉬룸 네이처 퍼 -> Mushroom Nature Fur)
 KO_COLOR_SUFFIX = {"네이처퍼": "Nature Fur", "내추럴퍼": "Nature Fur"}
 
@@ -632,6 +642,9 @@ def api_size_keys(size):
         head = re.sub(r"\(.*", "", s)
         if head and not re.search(r"\d", head):
             keys.add(head)
+    m = re.fullmatch(r"[A-Z]+\((\d+/\d+)\D.*\)", s)  # 오즈웨어 'S(35/36 AUS5/6)' -> '35/36'
+    if m:
+        keys.add(m.group(1))
     if re.fullmatch(r"\d+(/\d+)+", s):  # 35/36
         for n in s.split("/"):
             keys.add("EU" + n)
@@ -651,6 +664,29 @@ def store_size_keys(label, oz=False):
         m = re.fullmatch(r"(?:US|AU|W)(\d{1,2})(?:/M\d{1,2})?", head0)
         if m and 3 <= int(m.group(1)) <= 13:
             keys.add(f"EU{int(m.group(1)) + OZ_EU_OFFSET}")
+        # 오즈웨어 표기
+        #   '5L(EU35)', '남10/여12(EU42)', 'S(EU35/36)' -> 괄호 안 EU 사용
+        #   공급처 '5L', '10M/12L' 은 oz_size()로 EU 가 되고, 'S(35/36 AUS5/6)' 는 '35/36' 키가 됨
+        inner0 = re.search(r"\(EU(\d+)(?:([/-])(\d+))?\)", s)
+        if inner0:
+            if inner0.group(3):
+                keys.add(f"{inner0.group(1)}/{inner0.group(3)}")
+            else:
+                keys.add(f"EU{inner0.group(1)}")
+        if re.fullmatch(r"\d{1,2}L", head0):  # '5L' -> EU35
+            keys.add(oz_size(head0))
+        m = re.fullmatch(r"남(\d{1,2})/여(\d{1,2})", head0)  # '남10/여12' -> 10M, EU42
+        if m:
+            keys.update({f"{m.group(1)}M", f"EU{int(m.group(2)) + OZ_EU_OFFSET}"})
+        m = re.fullmatch(r"남성AU(\d{1,2})", head0)  # '남성AU6' -> 공급처 '6M'
+        if m:
+            keys.add(f"{m.group(1)}M")
+        m = re.fullmatch(r"(?:AU|US|EU)(\d+/\d+)", head0)  # 'AU5/6', 'US13/1', 'EU35/36' -> '5/6'
+        if m:
+            keys.add(m.group(1))
+        m = re.fullmatch(r"(\d+)CM", head0)  # 유아 '13cm' -> 공급처 'Up to 13cm' (= L)
+        if m and m.group(1) in OZ_BABY_CM:
+            keys.add(OZ_BABY_CM[m.group(1)])
     head = re.sub(r"\(.*", "", s)
     inner = re.search(r"\((.*)\)", s)
     keys.add(head)
