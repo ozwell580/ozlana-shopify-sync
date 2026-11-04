@@ -45,9 +45,10 @@ import requests
 import openpyxl
 
 FORMS_DIR = os.environ.get("FORMS_DIR", "forms")
-OUT_FILE = "smartstore_stock_upload.xlsx"
+OUT_PREFIX = os.environ.get("OUT_PREFIX", "smartstore_stock")  # 시드니셀러: sydneyseller_stock
+OUT_FILE = f"{OUT_PREFIX}_upload.xlsx"
 UPLOAD_LIMIT = 450  # 스마트스토어 수정양식 업로드 최대 500개
-REPORT_FILE = "smartstore_stock_report.txt"
+REPORT_FILE = f"{OUT_PREFIX}_report.txt"
 
 SAFETY_STOCK = int(os.environ.get("SAFETY_STOCK", "0"))  # 공급처 재고에서 빼고 올릴 수량
 MAX_STOCK = 999
@@ -150,6 +151,8 @@ COLOR_MAP = {
     "나이트셰이드": "Nightshade", "페일모브": "Pale Mauve", "신더": "Cinder", "시걸": "Seagull",
     "클라우드": "Cloud", "펄리버": "Pearl River", "애쉬": "Ash", "메탈릭핑크": "Metallic Pink",
     "메탈릭브론즈": "Metallic Bronze", "초코": "Chocolate",
+    "크리미그레이": "Creamy Grey", "오트밀크": "Oat Milk", "내추럴베이지": "Natural Beige",
+    "내추럴브라운": "Natural Brown", "페일마브": "Pale Mauve", "채스트넛": "Chestnut", "캐러멜": "Caramel",
 }
 
 # 공급처 색상 표기 오타/별칭 (영문, norm_en 기준) -> 올바른 표기
@@ -1100,7 +1103,7 @@ def main():
 
     # 업로드 파일 저장: 첫 번째 양식의 1~2행(제목)을 그대로 쓰고 데이터만 채움
     # 스마트스토어 수정양식 업로드는 한 번에 500개까지라 450개씩 나눠서 저장
-    for old in glob.glob("smartstore_stock_upload*.xlsx"):
+    for old in glob.glob(f"{OUT_PREFIX}_upload*.xlsx"):
         os.remove(old)
     out_files = []
     chunks = [out_rows[i:i + UPLOAD_LIMIT] for i in range(0, len(out_rows), UPLOAD_LIMIT)] or [[]]
