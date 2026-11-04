@@ -141,7 +141,8 @@ COLOR_MAP = {
 
 # 공급처 색상 표기 오타/별칭 (영문, norm_en 기준) -> 올바른 표기
 EN_COLOR_ALIAS = {"chestrnut": "chestnut", "chesnut": "chestnut", "choclate": "chocolate",
-                  "grey": "grey", "gray": "grey", "lvory": "ivory"}
+                  "grey": "grey", "gray": "grey", "lvory": "ivory",
+                  "coffee": "coffe", "bluelight": "lightblue"}
 # 한글 색상 뒤에 붙는 수식어 -> 영문 (예: 머쉬룸 네이처 퍼 -> Mushroom Nature Fur)
 KO_COLOR_SUFFIX = {"네이처퍼": "Nature Fur", "내추럴퍼": "Nature Fur"}
 
