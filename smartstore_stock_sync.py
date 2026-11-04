@@ -151,7 +151,12 @@ EN_COLOR_ALIAS = {"chestrnut": "chestnut", "chesnut": "chestnut", "choclate": "c
 KO_COLOR_SUFFIX = {"네이처퍼": "Nature Fur", "내추럴퍼": "Nature Fur"}
 
 # 상품별 색상 연결 (상품코드, 띄어쓰기 뺀 한글 색상) -> 공급처 색상
-PRODUCT_COLOR_ALIAS = {("DK098A", "체스트넛"): "Chestnut(RED)"}
+PRODUCT_COLOR_ALIAS = {
+    ("DK098A", "체스트넛"): "Chestnut(RED)",
+    ("OZ8004", "토프"): "MUSHROOM",
+    ("OZ8007", "토프"): "MUSHROOM",
+    ("OZ8011", "토프"): "MUSHROOM",
+}
 # 스마트스토어 코드 -> 공급처 코드
 OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX"}
 # 오즈라나 S/M/L 상품 -> 공급처 4#/5#/6#
