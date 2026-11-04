@@ -22,6 +22,9 @@
   - 공급처에 없는 색상/사이즈/상품 -> 재고 0 (품절)  [DK·에버어그]
   - 오즈웨어·오즈라나는 공급처에서 못 찾은 상품/색상/사이즈의 재고를 그대로 둠 (재고 유지, 보고서에 표시)
   - 오즈라나 사이즈는 AU 사이즈 -> EU(AU+30, 예: AU5 -> EU35)로 바꿔 맞춤. 바꾸려면 OZ_EU_OFFSET
+    (스마트스토어에 EU로 적힌 옵션은 공급처 괄호 안 EU로 맞춤. 예: 9#(40) -> EU40)
+  - 오즈라나 OZ8001~OZ8014 의 S/M/L 은 공급처 4#/5#/6# 로 연결 (OZ_SML_CODES)
+  - 코드가 다른 상품은 OZ_CODE_ALIAS, 상품별 색상 연결은 PRODUCT_COLOR_ALIAS 에서 관리
   - 단독형(컬러만) -> 조합형으로 바꿔서 색상별 재고 입력
   - 간편 입력 옵션 상품(옵션형태 공란)은 엑셀 수정이 안 돼서 업로드 파일에서 제외
   - 판매자 상품코드가 빈 상품은 상품명 속 코드로 채움
@@ -145,6 +148,22 @@ EN_COLOR_ALIAS = {"chestrnut": "chestnut", "chesnut": "chestnut", "choclate": "c
                   "coffee": "coffe", "bluelight": "lightblue"}
 # 한글 색상 뒤에 붙는 수식어 -> 영문 (예: 머쉬룸 네이처 퍼 -> Mushroom Nature Fur)
 KO_COLOR_SUFFIX = {"네이처퍼": "Nature Fur", "내추럴퍼": "Nature Fur"}
+
+# 상품별 색상 연결 (상품코드, 띄어쓰기 뺀 한글 색상) -> 공급처 색상
+PRODUCT_COLOR_ALIAS = {("DK098A", "체스트넛"): "Chestnut(RED)"}
+# 스마트스토어 코드 -> 공급처 코드
+OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX"}
+# 오즈라나 S/M/L 상품 -> 공급처 4#/5#/6#
+OZ_SML_CODES = {f"OZ80{n:02d}" for n in range(1, 15)}  # OZ8001~OZ8014
+OZ_SML_MAP = {"S": "AU4", "M": "AU5", "L": "AU6"}
+
+
+def oz_store_size(code, label):
+    k = str(label or "").strip().upper()
+    if code in OZ_SML_CODES and k in OZ_SML_MAP:
+        return OZ_SML_MAP[k]
+    return label
+
 
 KIDS_EU_TO_AU = {"21-22": "4-5", "23-25": "6-7", "26-28": "8-10", "29-32": "11-12", "33-34": "13-2"}
 BABY_MONTHS = {"S": "0-6 M", "M": "6-12 M", "L": "12-18 M", "XL": "18-24 M"}
@@ -357,6 +376,12 @@ def oz_size(size):
     return s
 
 
+def oz_eu(raw):
+    """오즈라나 '9#(40)' -> 'EU40' (괄호 안 EU 표기). 없으면 None"""
+    m = re.search(r"\((\d{2})\)", str(raw or ""))
+    return f"EU{m.group(1)}" if m else None
+
+
 def fetch_ozlana():
     """{상품코드: [ {color, size, stock} ]}  (오즈라나 /stocks API)"""
     if not OZLANA_TOKEN:
@@ -380,7 +405,8 @@ def fetch_ozlana():
                         if not isinstance(st, dict):
                             continue
                         item = {"color": color, "size": oz_size(st.get("sizeRemark")),
-                                "raw_size": str(st.get("sizeRemark", "")), "stock": to_int(st.get("stockNum"))}
+                                "raw_size": str(st.get("sizeRemark", "")), "stock": to_int(st.get("stockNum")),
+                                "eu": oz_eu(st.get("sizeRemark"))}
                         keys = {mark}
                         if mark.startswith("OZ3"):
                             keys.add("OZ" + mark[3:])
@@ -563,10 +589,13 @@ def ko_color_to_en(ko):
     return None
 
 
-def find_color(skus, ko, allow_guess=True, allow_single=True):
+def find_color(skus, ko, allow_guess=True, allow_single=True, code=None):
     """한글 색상 -> 공급처 색상. (색상, 추정여부)
     allow_single: 공급처 색상이 하나뿐이면 그 색으로 봄 (오즈는 영문이 다르면 쓰지 않음)"""
     colors = sorted({str(s["color"]) for s in skus})
+    alias = PRODUCT_COLOR_ALIAS.get((code, norm_ko(ko)))
+    if alias in colors:
+        return alias, False
     en = ko_color_to_en(ko)
     if en:
         for c in colors:
@@ -652,11 +681,18 @@ def is_size_label(v):
         head))
 
 
-def size_stock(skus, color, label, oz=False):
+def size_stock(skus, color, label, oz=False, code=None):
+    if oz:
+        label = oz_store_size(code, label)
     keys = store_size_keys(label, oz)
-    hits = [s for s in skus if (color is None or s["color"] == color) and keys & api_size_keys(s["size"])]
+    pool = [s for s in skus if color is None or s["color"] == color]
+    head = re.sub(r"\(.*", "", str(label or "").strip().upper().replace(" ", ""))
+    if oz and re.fullmatch(r"EU\d+", head) and any(s.get("eu") for s in pool):
+        # 오즈라나 EU 표기 옵션은 공급처 괄호 안 EU(예: 9#(40) -> EU40)로 맞춤
+        hits = [s for s in pool if s.get("eu") in keys]
+    else:
+        hits = [s for s in pool if keys & api_size_keys(s["size"])]
     if not hits:
-        pool = [s for s in skus if color is None or s["color"] == color]
         if len(pool) == 1 and "FREE" in api_size_keys(pool[0]["size"]):
             hits = pool
     return (sum(s["stock"] for s in hits), True) if hits else (0, False)
@@ -780,7 +816,7 @@ def main():
         if KIDS_NOTICE_TEMPLATE and (KIDS_RE.search(name) or re.search(r"\d+K$", code)):
             r[col["상품정보제공고시 템플릿코드"]] = KIDS_NOTICE_TEMPLATE
         typ = r[col["옵션형태"]]
-        skus = sup[brand].get(code)
+        skus = sup[brand].get(OZ_CODE_ALIAS.get(code, code))
         colors_all = ", ".join(sorted({str(s["color"]) for s in skus})) if skus else ""
 
         # 간편 입력 옵션 -> 엑셀로 수정 불가, 업로드에서 제외
@@ -827,9 +863,9 @@ def main():
             optname = (lines(r, "옵션명") or ["컬러"])[0]
             if is_oz:
                 if "사이즈" in optname:
-                    miss = [o for o in opts if not size_stock(skus, None, o, oz=True)[1]]
+                    miss = [o for o in opts if not size_stock(skus, None, o, oz=True, code=code)[1]]
                 else:
-                    miss = [o for o in opts if find_color(skus, o, allow_single=False)[0] is None]
+                    miss = [o for o in opts if find_color(skus, o, allow_single=False, code=code)[0] is None]
                 if miss:
                     # 단독형은 옵션별 기존 재고를 알 수 없어 상품 전체를 그대로 둠
                     R[KEEP].append(f"[{brand}] {code}  {', '.join(miss)}  (단독형이라 상품 전체 재고 유지)")
@@ -839,13 +875,13 @@ def main():
             qtys = []
             if "사이즈" in optname:
                 for o in opts:
-                    q, ok = size_stock(skus, None, o, oz=is_oz)
+                    q, ok = size_stock(skus, None, o, oz=is_oz, code=code)
                     if not ok:
                         R["공급처에 없는 사이즈(품절)"].append(f"{code}  '{o}'")
                     qtys.append(final_qty(q))
             else:
                 for o in opts:
-                    c, guess = find_color(skus, o, allow_guess=(brand != BRAND_DK), allow_single=not is_oz)
+                    c, guess = find_color(skus, o, allow_guess=(brand != BRAND_DK), allow_single=not is_oz, code=code)
                     if c is None:
                         R["공급처에 없는 색상(품절)"].append(f"[{brand}] {code}  '{o}'  (공급처 색상: {colors_all})")
                         qtys.append(0)
@@ -891,7 +927,7 @@ def main():
             if c is None:
                 return None, True
             if c not in color_cache:
-                en, guess = find_color(skus, c, allow_guess=(brand != BRAND_DK), allow_single=not is_oz)
+                en, guess = find_color(skus, c, allow_guess=(brand != BRAND_DK), allow_single=not is_oz, code=code)
                 if en is None and is_oz:
                     R[KEEP].append(f"[{brand}] {code}  색상 '{c}'  (공급처 색상: {colors_all})")
                 elif en is None:
@@ -1004,7 +1040,7 @@ def main():
             if s is None:
                 q = sum(x["stock"] for x in skus if en is None or x["color"] == en)
             else:
-                q, found = size_stock(skus, en, s, oz=is_oz)
+                q, found = size_stock(skus, en, s, oz=is_oz, code=code)
                 if not found and is_oz:
                     if use != "N":
                         sizes = ", ".join(sorted({str(x.get("raw_size", x["size"])) for x in skus
