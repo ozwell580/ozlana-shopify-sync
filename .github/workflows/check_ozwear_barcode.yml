@@ -1,0 +1,34 @@
+name: Check Ozwear Barcode
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Run barcode check
+        env:
+          OZWEAR_BASE_URL: ${{ secrets.OZWEAR_BASE_URL }}
+          OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
+          OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
+        run: python check_ozwear_barcode.py
+
+      - name: Upload barcode CSV (if created)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ozwear-barcodes
+          path: ozwear_barcodes.csv
+          if-no-files-found: ignore
