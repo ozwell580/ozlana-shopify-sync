@@ -20,7 +20,8 @@
   - DK: 사이즈 옵션을 DK 사이즈표(EU)로 맞춤. 남는 옛 옵션은 숨김(N), 부족한 옵션은 '추가'
   - 에버어그: 사이즈 표기는 그대로 두고 에버어그 재고로 갱신
   - 공급처에 없는 색상/사이즈/상품 -> 재고 0 (품절)  [DK·에버어그]
-  - 오즈웨어·오즈라나는 공급처에서 못 찾은 상품/색상/사이즈의 재고를 그대로 둠 (재고 유지, 보고서에 표시)
+  - 오즈웨어·오즈라나: 공급처에 없는 색상/사이즈 -> 재고 0 (품절)
+    공급처에서 상품 자체를 못 찾으면(신상 미입고 등) 재고를 그대로 둠 (재고 유지, 보고서에 표시)
   - 오즈라나 사이즈는 AU 사이즈 -> EU(AU+30, 예: AU5 -> EU35)로 바꿔 맞춤. 바꾸려면 OZ_EU_OFFSET
     (스마트스토어에 EU로 적힌 옵션은 공급처 괄호 안 EU로 맞춤. 예: 9#(40) -> EU40)
   - 오즈라나 OZ8001~OZ8014 의 S/M/L 은 공급처 4#/5#/6# 로 연결 (OZ_SML_CODES)
@@ -861,23 +862,12 @@ def main():
                 continue
             opts = [c.strip() for c in vals[0].split(",") if c.strip()]
             optname = (lines(r, "옵션명") or ["컬러"])[0]
-            if is_oz:
-                if "사이즈" in optname:
-                    miss = [o for o in opts if not size_stock(skus, None, o, oz=True, code=code)[1]]
-                else:
-                    miss = [o for o in opts if find_color(skus, o, allow_single=False, code=code)[0] is None]
-                if miss:
-                    # 단독형은 옵션별 기존 재고를 알 수 없어 상품 전체를 그대로 둠
-                    R[KEEP].append(f"[{brand}] {code}  {', '.join(miss)}  (단독형이라 상품 전체 재고 유지)")
-                    out_rows.append(r)
-                    out_brands.append(brand)
-                    continue
             qtys = []
             if "사이즈" in optname:
                 for o in opts:
                     q, ok = size_stock(skus, None, o, oz=is_oz, code=code)
                     if not ok:
-                        R["공급처에 없는 사이즈(품절)"].append(f"{code}  '{o}'")
+                        R["공급처에 없는 사이즈(품절)"].append(f"[{brand}] {code}  '{o}'")
                     qtys.append(final_qty(q))
             else:
                 for o in opts:
@@ -928,9 +918,7 @@ def main():
                 return None, True
             if c not in color_cache:
                 en, guess = find_color(skus, c, allow_guess=(brand != BRAND_DK), allow_single=not is_oz, code=code)
-                if en is None and is_oz:
-                    R[KEEP].append(f"[{brand}] {code}  색상 '{c}'  (공급처 색상: {colors_all})")
-                elif en is None:
+                if en is None:
                     R["공급처에 없는 색상(품절)"].append(f"[{brand}] {code}  '{c}'  (공급처 색상: {colors_all})")
                 elif guess:
                     R["추정 매칭 색상(확인 권장)"].append(f"{code}  '{c}' -> {en}")
@@ -1035,21 +1023,19 @@ def main():
         for (c, s), v, use, oq in zip(parsed, vals, uses, old_q):
             en, ok = resolve(c)
             if not ok:
-                qtys.append(str(to_int(oq)) if is_oz else "0")
+                qtys.append("0")
                 continue
             if s is None:
                 q = sum(x["stock"] for x in skus if en is None or x["color"] == en)
             else:
                 q, found = size_stock(skus, en, s, oz=is_oz, code=code)
-                if not found and is_oz:
-                    if use != "N":
+                if not found and use != "N":
+                    if is_oz:
                         sizes = ", ".join(sorted({str(x.get("raw_size", x["size"])) for x in skus
                                                   if en is None or x["color"] == en}))
-                        R[KEEP].append(f"[{brand}] {code}  '{v}'  (공급처 사이즈: {sizes})")
-                    qtys.append(str(to_int(oq)))
-                    continue
-                if not found and use != "N":
-                    R["공급처에 없는 사이즈(품절)"].append(f"[{brand}] {code}  '{v}'")
+                        R["공급처에 없는 사이즈(품절)"].append(f"[{brand}] {code}  '{v}'  (공급처 사이즈: {sizes})")
+                    else:
+                        R["공급처에 없는 사이즈(품절)"].append(f"[{brand}] {code}  '{v}'")
             qtys.append(str(final_qty(q)))
         r[col["옵션 재고수량"]] = "\n".join(qtys)
         r[col["재고수량"]] = sum(int(x) for x in qtys)
