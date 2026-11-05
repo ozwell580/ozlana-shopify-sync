@@ -385,6 +385,9 @@ def main():
     with open(REPORT_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(summary) + "\n" + "\n".join(body) + "\n")
     print("\n" + "\n".join(summary))
+    # 상세 내용도 실행 기록에 남김 (보고서 파일을 내려받지 않아도 확인 가능)
+    print("\n========== 상세 보고서 ==========")
+    print("\n".join(body))
     stop_keys = [k for k in order[:3] if R[k]]
     if stop_keys:
         print("\n".join(R[stop_keys[0]][:5]))
