@@ -95,7 +95,8 @@ def main():
         elif oi.get("optionSimple"):
             k = "simple"
         elif oi:
-            k = "other:" + ",".join(sorted(oi.keys()))
+            k = "other"
+            print(f"기타 옵션 구조 {no}: {sorted(oi.keys())}")
         else:
             k = "none"
         disc = bool(((d.get("originProduct") or {}).get("customerBenefit") or {}).get("immediateDiscountPolicy"))
@@ -105,19 +106,25 @@ def main():
             kinds[k2].append(no)
             save(f"detail_{k2}_{no}.json", d)
         time.sleep(0.25)
-        if all(len(v) >= 2 for v in kinds.values()) and len(kinds) >= 4:
+        if all(len(v) >= 2 for v in kinds.values()) and len(kinds) >= 5:
             break
     print("옵션 유형별 샘플:", json.dumps(kinds, ensure_ascii=False))
 
     # 3) 옵션 재고 변경 API 존재/필드 확인 (빈 요청 -> 검증 오류, 변경 없음)
     # 실제 상품을 건드리지 않도록 존재하지 않는 상품번호(1)로만 보냄
     probes = {}
-    for path in ("/v1/products/origin-products/1/option-stock",
-                 "/v1/products/origin-products/1/option-stocks",
-                 "/v1/products/origin-products/1/stock"):
-        r = call("PUT", path, tok, {})
-        probes[path] = {"status": r.status_code, "body": r.text[:3000]}
-        print(f"PUT {path} (빈 요청) -> {r.status_code}\n{r.text[:1500]}")
+    path = "/v1/products/origin-products/1/option-stock"
+    tries = {
+        "empty_optionInfo": {"optionInfo": {}},
+        "combination_only": {"optionInfo": {"optionCombinations": [{"id": 1, "stockQuantity": 0}]}},
+        "combination_full": {"productSalePrice": {"salePrice": 10000},
+                             "optionInfo": {"optionCombinations": [{"id": 1, "stockQuantity": 0, "price": 0,
+                                                                    "usable": True}]}},
+    }
+    for label, body in tries.items():
+        r = call("PUT", path, tok, body)
+        probes[label] = {"status": r.status_code, "body": r.text[:3000]}
+        print(f"PUT option-stock ({label}) -> {r.status_code}\n{r.text[:1500]}")
     save("probes.json", probes)
 
 
