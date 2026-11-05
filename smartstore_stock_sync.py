@@ -648,6 +648,8 @@ def api_size_keys(size):
     if m:
         for n in m.group(1).split("/"):
             keys.add("EU" + n)
+        if "/" in m.group(1):  # 스마트스토어 묶음 표기 'EU36/37' 과도 맞춤
+            keys.add("EU" + m.group(1))
         m2 = re.search(r"(\d+)L", s)
         if m2:
             keys.add("AU" + m2.group(1))
