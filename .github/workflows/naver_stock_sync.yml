@@ -1,0 +1,67 @@
+name: 시드니셀러 재고 자동 연동 (커머스API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run = 미리보기만 / test-one = 1개만 실제 변경 / apply = 전부 실제 변경"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - "dry-run"
+          - "test-one"
+          - "apply"
+      only_codes:
+        description: "특정 상품코드만 (쉼표 구분, 비우면 전체)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: naver-stock-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: pip install requests openpyxl bcrypt
+
+      - name: Run stock sync
+        env:
+          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          ONLY_CODES: ${{ github.event.inputs.only_codes }}
+          SYDNEY_CLIENT_ID: ${{ secrets.SYDNEY_CLIENT_ID }}
+          SYDNEY_CLIENT_SECRET: ${{ secrets.SYDNEY_CLIENT_SECRET }}
+          NAVER_PROXY: ${{ secrets.NAVER_PROXY }}
+          EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
+          EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
+          EVERUGG_BASE_URL: ${{ secrets.EVERUGG_BASE_URL }}
+          OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
+          OZLANA_BASE_URL: ${{ secrets.OZLANA_BASE_URL }}
+          OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
+          OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python naver_stock_sync.py
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: naver_stock_report
+          path: naver_stock_report.txt
+          if-no-files-found: ignore
+          retention-days: 14
