@@ -1,0 +1,32 @@
+name: (확인) 시드니셀러 상품 구조
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: pip install requests bcrypt
+
+      - name: Run probe
+        env:
+          SYDNEY_CLIENT_ID: ${{ secrets.SYDNEY_CLIENT_ID }}
+          SYDNEY_CLIENT_SECRET: ${{ secrets.SYDNEY_CLIENT_SECRET }}
+          NAVER_PROXY: ${{ secrets.NAVER_PROXY }}
+        run: python naver_probe.py
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: naver_probe
+          path: naver_probe/
+          retention-days: 7
