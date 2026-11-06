@@ -1,0 +1,35 @@
+name: Ozlana Stock Dump
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: pip install requests
+
+      - name: Download Ozlana stock
+        env:
+          OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
+          OZLANA_BASE_URL: ${{ secrets.OZLANA_BASE_URL }}
+        run: python ozlana_stock_dump.py
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ozlana_stock_result
+          path: |
+            ozlana_stock_raw.json
+            ozlana_stock_summary.txt
+          if-no-files-found: warn
