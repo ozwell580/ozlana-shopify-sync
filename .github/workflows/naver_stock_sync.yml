@@ -1,6 +1,12 @@
 name: 시드니셀러 재고 자동 연동 (커머스API)
 
 on:
+  # 시드니 시간 오전 7시, 저녁 7시 (GitHub는 UTC 기준이라 서머타임/표준시 두 경우를 모두 걸고 아래에서 하나만 실행)
+  schedule:
+    - cron: "0 20 * * *"   # 서머타임(AEDT, UTC+11) 오전 7시
+    - cron: "0 21 * * *"   # 표준시(AEST, UTC+10) 오전 7시
+    - cron: "0 8 * * *"    # 서머타임 저녁 7시
+    - cron: "0 9 * * *"    # 표준시 저녁 7시
   workflow_dispatch:
     inputs:
       mode:
@@ -27,20 +33,39 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
+      - name: Check Sydney time (scheduled runs only)
+        id: gate
+        run: |
+          OFFSET=$(TZ=Australia/Sydney date +%z)
+          SCHED="${{ github.event.schedule }}"
+          RUN=yes
+          if [ -n "$SCHED" ]; then
+            case "$SCHED" in
+              "0 20 * * *"|"0 8 * * *") [ "$OFFSET" = "+1100" ] || RUN=no ;;
+              "0 21 * * *"|"0 9 * * *") [ "$OFFSET" = "+1000" ] || RUN=no ;;
+            esac
+          fi
+          echo "시드니 시각: $(TZ=Australia/Sydney date '+%Y-%m-%d %H:%M %Z')  실행: $RUN"
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'yes'
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'yes'
         with:
           python-version: "3.11"
 
       - name: Install packages
+        if: steps.gate.outputs.run == 'yes'
         run: pip install requests openpyxl bcrypt
 
       - name: Run stock sync
+        if: steps.gate.outputs.run == 'yes'
         env:
-          MODE: ${{ github.event.inputs.mode || 'dry-run' }}
+          MODE: ${{ github.event_name == 'schedule' && 'apply' || github.event.inputs.mode || 'dry-run' }}
           ONLY_CODES: ${{ github.event.inputs.only_codes }}
           SYDNEY_CLIENT_ID: ${{ secrets.SYDNEY_CLIENT_ID }}
           SYDNEY_CLIENT_SECRET: ${{ secrets.SYDNEY_CLIENT_SECRET }}
@@ -58,7 +83,7 @@ jobs:
         run: python naver_stock_sync.py
 
       - name: Upload report
-        if: always()
+        if: always() && steps.gate.outputs.run == 'yes'
         uses: actions/upload-artifact@v4
         with:
           name: naver_stock_report
