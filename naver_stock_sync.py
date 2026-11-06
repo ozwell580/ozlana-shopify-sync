@@ -52,6 +52,19 @@ SLEEP = 0.25
 KEEP_STATUS = {"SALE", "OUTOFSTOCK"}  # 판매중·품절 상품만 처리 (판매중지·삭제 등은 건너뜀)
 
 
+def load_everugg_models(path="everugg_models.txt"):
+    """에버어그 가격표 모델번호. 재고 API에 없어도 여기 있으면 재고 유지, 여기도 없으면 품절"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {l.strip().upper() for l in f if l.strip() and not l.startswith("#")}
+    except FileNotFoundError:
+        print(f"⚠️ {path} 없음: 에버어그 가격표 기준을 쓰지 못함")
+        return set()
+
+
+EVERUGG_MODELS = load_everugg_models()
+
+
 # ================================================================ 네이버 API
 class Naver:
     def __init__(self):
@@ -188,6 +201,9 @@ def plan_product(d, sup, R):
     if not skus:
         if is_oz:
             R["오즈 공급처에 없는 상품 (재고 유지)"].append(f"[{brand}] {code}  {name}")
+            return brand, code, None
+        if brand == S.BRAND_EU and code in EVERUGG_MODELS:
+            R["에버어그 재고 API엔 없지만 가격표에 있는 상품 (재고 유지)"].append(f"[{brand}] {code}  {name}")
             return brand, code, None
         R["공급처에 없는 상품 (전체 품절)"].append(f"[{brand}] {code}  {name}")
         return brand, code, {c["id"]: 0 for c in combos}
@@ -364,7 +380,8 @@ def main():
     order = ["❌ 재고 말고 다른 값이 바뀜 -> 즉시 중단", "❌ 변경 실패", "❌ 변경 후 확인 실패", "⚠️ 재고가 예상과 다름",
              "⚠️ 공급처 이상 의심으로 건너뛴 브랜드", "✅ 변경 완료", "재고 변경 예정", "재고 변경 대상",
              "공급처에 없는 상품 (전체 품절)", "공급처에 없는 색상 (품절)", "공급처에 없는 사이즈 (품절)",
-             "추정 매칭 색상 (확인 권장)", "오즈 공급처에 없는 상품 (재고 유지)",
+             "추정 매칭 색상 (확인 권장)", "에버어그 재고 API엔 없지만 가격표에 있는 상품 (재고 유지)",
+             "오즈 공급처에 없는 상품 (재고 유지)",
              "건너뜀: 옵션 없음 (재고 유지)", "건너뜀: 단독형 옵션 (재고 유지)", "건너뜀: 간편 입력 옵션 (재고 유지)",
              "상세 조회 실패 (건너뜀)", "다른 브랜드 (건너뜀)"]
     order += [k for k in R if k not in order]
