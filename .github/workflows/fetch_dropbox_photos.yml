@@ -1,0 +1,59 @@
+name: Fetch Dropbox Photos
+
+on:
+  workflow_dispatch:
+    inputs:
+      items:
+        description: "CODE=dropbox_url 를 줄바꿈(또는 ;)으로 구분"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and resize
+        env:
+          ITEMS: ${{ github.event.inputs.items }}
+        run: |
+          set -u
+          mkdir -p out
+          echo "$ITEMS" | tr ';' '\n' | while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            code="${line%%=*}"; url="${line#*=}"
+            url="${url/dl=0/dl=1}"
+            echo "== $code"
+            mkdir -p "raw/$code" "out/$code"
+            curl -sSL -o "raw/$code.zip" "$url" && (cd "raw/$code" && unzip -q -o "../$code.zip" -x '/' || true)
+            find "raw/$code" -type f | head -100
+          done
+          python3 - <<'PY'
+          import os, glob
+          from PIL import Image
+          for f in glob.glob("raw/*/**/*", recursive=True):
+              if not os.path.isfile(f) or f.endswith(".zip"): continue
+              code = f.split("/")[1]
+              rel = os.path.relpath(f, f"raw/{code}").replace("/", "__")
+              base, ext = os.path.splitext(rel)
+              try:
+                  im = Image.open(f); im.load()
+              except Exception:
+                  continue
+              im.thumbnail((2000, 2000))
+              if im.mode in ("RGBA", "LA", "P"):
+                  im = im.convert("RGBA")
+                  bg = Image.new("RGB", im.size, "white"); bg.paste(im, mask=im.split()[-1]); im = bg
+              else:
+                  im = im.convert("RGB")
+              im.save(f"out/{code}/{base}.jpg", quality=88)
+              print("saved", code, base, im.size)
+          PY
+      - name: Push to branch
+        run: |
+          cd out
+          git init -q -b photos
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git add -A && git commit -q -m "dropbox photos"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" photos:tmp-dropbox-photos
