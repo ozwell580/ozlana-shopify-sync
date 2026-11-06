@@ -9,7 +9,7 @@
   공급처 재고 (실행할 때 자동 호출)
     - DK UGG 재고 API
     - 에버어그: GitHub 시크릿 EVERUGG_USER_ID / EVERUGG_PASSWORD
-    - 오즈라나: GitHub 시크릿 OZLANA_TOKEN (오즈라나 /stocks API)
+    - 오즈라나: GitHub 시크릿 OZLANA_TOKEN (오즈라나 /stocks API, 시드니+중국 창고 합산 — ozlana_api.py)
     - 오즈웨어: GitHub 시크릿 OZWEAR_API_KEY / OZWEAR_API_SECRET + SHOPIFY_STORE / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET
       (Shopify 'OZWEAR UGG' 상품의 SKU·색상·사이즈를 읽고, 그 SKU로 오즈웨어 API 재고를 조회)
 출력
@@ -411,43 +411,38 @@ def oz_eu(raw):
 
 
 def fetch_ozlana():
-    """{상품코드: [ {color, size, stock} ]}  (오즈라나 /stocks API)"""
+    """{상품코드: [ {color, size, stock} ]}  (오즈라나 /stocks API, 시드니+중국 창고 합산)"""
     if not OZLANA_TOKEN:
         SUPPLIER_NOTES.append("오즈라나: OZLANA_TOKEN 시크릿이 없어 재고를 가져오지 못함 (오즈라나 재고 유지)")
         return {}
-    for attempt in range(3):
-        try:
-            r = requests.get(f"{OZLANA_BASE_URL}/stocks", headers={"X-Token": OZLANA_TOKEN}, timeout=120)
-            if r.status_code == 200:
-                raw = r.json().get("data", [])
-                prods = json.loads(raw) if isinstance(raw, str) else raw
-                out = collections.defaultdict(list)
-                for p in prods or []:
-                    if not isinstance(p, dict):
-                        continue
-                    mark = str(p.get("prodMark", "")).strip().upper()
-                    if not mark:
-                        continue
-                    color = str(p.get("colorName", "")).strip()
-                    for st in p.get("stocks") or []:
-                        if not isinstance(st, dict):
-                            continue
-                        item = {"color": color, "size": oz_size(st.get("sizeRemark")),
-                                "raw_size": str(st.get("sizeRemark", "")), "stock": to_int(st.get("stockNum")),
-                                "eu": oz_eu(st.get("sizeRemark"))}
-                        keys = {mark}
-                        if mark.startswith("OZ3"):
-                            keys.add("OZ" + mark[3:])
-                        for k in keys:
-                            out[k].append(item)
-                print(f"오즈라나 재고: {len(out)}개 상품코드")
-                return out
-            print(f"오즈라나 API -> {r.status_code}")
-        except Exception as e:
-            print(f"오즈라나 API 실패 ({attempt + 1}차): {e}")
-        time.sleep(10 * (attempt + 1))
-    SUPPLIER_NOTES.append("오즈라나: API 호출 실패 (오즈라나 재고 유지)")
-    return {}
+    import ozlana_api
+    try:
+        prods = ozlana_api.get_all_stocks()
+    except Exception as e:
+        print(f"오즈라나 API 실패: {e}")
+        prods = None
+    if prods is None:
+        SUPPLIER_NOTES.append("오즈라나: API 호출 실패 (오즈라나 재고 유지)")
+        return {}
+    out = collections.defaultdict(list)
+    for p in prods:
+        mark = str(p.get("prodMark", "")).strip().upper()
+        if not mark:
+            continue
+        color = str(p.get("colorName", "")).strip()
+        for st in p.get("stocks") or []:
+            if not isinstance(st, dict):
+                continue
+            item = {"color": color, "size": oz_size(st.get("sizeRemark")),
+                    "raw_size": str(st.get("sizeRemark", "")), "stock": to_int(st.get("stockNum")),
+                    "eu": oz_eu(st.get("sizeRemark"))}
+            keys = {mark}
+            if mark.startswith("OZ3"):
+                keys.add("OZ" + mark[3:])
+            for k in keys:
+                out[k].append(item)
+    print(f"오즈라나 재고: {len(out)}개 상품코드 (창고별: {ozlana_api.summary_text()})")
+    return out
 
 
 def shopify_token():

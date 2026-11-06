@@ -532,13 +532,14 @@ def sync_data():
     print(f"-> 총 {len(shopify_variants)}개 쇼피파이 SKU 매핑 완료")
 
     if OZLANA_TOKEN:
-        print("2-1. 오즈라나 /stocks API 수집 중...")
+        print("2-1. 오즈라나 /stocks API 수집 중 (시드니+중국 창고)...")
         try:
-            headers = {"X-Token": OZLANA_TOKEN}
-            res_stocks = requests.get(f"{BASE_URL_OZLANA}/stocks", headers=headers)
-            if res_stocks.status_code == 200:
-                raw_data = res_stocks.json().get("data", [])
-                products = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+            import ozlana_api  # 시드니+중국 창고 재고 합산
+            products = ozlana_api.get_all_stocks()
+            if products is None:
+                print("-> [Ozlana] 재고 조회 실패, 이번 회차는 오즈라나 재고 유지")
+            else:
+                print(f"-> [Ozlana] 창고별 재고: {ozlana_api.summary_text()}")
 
                 updated_count = 0
                 same_count = 0
