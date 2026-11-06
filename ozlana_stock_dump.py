@@ -179,6 +179,19 @@ def main():
             + (f" 추가코드 {extra[:20]}" if extra else "")
             + (f" OZ3005/3006 있음" if {"OZ3005", "OZ3006"} & sm[2] else ""))
 
+    log("\n[새 연동 모듈 ozlana_api.get_all_stocks() 결과 (시드니+중국 합산)]")
+    try:
+        import ozlana_api
+        merged = ozlana_api.get_all_stocks()
+        if merged is None:
+            log("  조회 실패")
+        else:
+            tot = sum(to_int(s.get("stockNum")) for x in merged for s in (x.get("stocks") or []))
+            cn = sum(1 for x in merged for s in (x.get("stocks") or []) if s.get("warehouseStocks", {}).get("55"))
+            log(f"  창고별: {ozlana_api.summary_text()} | 합산 상품행 {len(merged)}, 재고합계 {tot}, 중국재고 있는 옵션 {cn}")
+    except Exception as e:
+        log(f"  에러: {e}")
+
     with open("ozlana_stock_summary.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
