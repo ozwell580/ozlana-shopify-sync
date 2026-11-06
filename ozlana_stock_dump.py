@@ -144,7 +144,9 @@ def main():
 
     base = summarize(prods)
     log(f"\n[창고별 조회 시도]  기본 /stocks: 행 {base[0]}, 재고합계 {base[1]}, OZ3001 BLACK {base[3]}")
-    for path, params in [("/stocks", {"warehouseId": 49}), ("/stocks", {"warehouseId": 55}),
+    for path, params in [("/stocks", {"warehouse_id": 49}), ("/stocks", {"warehouse_id": "49"}), ("/stocks", {"warehouse_id": "55"}),
+                         ("/stocks", {"warehouse_id": "SYDNEY"}), ("/stocks", {"warehouse_id": "CHINA"}),
+                         ("/stocks", {"warehouse_id": 1}), ("/stocks", {"warehouseId": 55}),
                          ("/stocks", {"warehouse_id": 55}), ("/stocks", {"warehouse": 55}),
                          ("/stocks", {"warehouse": "CHINA"}), ("/stocks", {"whId": 55}),
                          ("/stocks", {"wid": 55}), ("/stocks/55", None), ("/stocks/49", None),
