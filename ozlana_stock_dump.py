@@ -20,6 +20,13 @@ WAREHOUSE_HINTS = ("ware", "house", "store", "stock", "location", "loc", "depot"
 lines = []
 
 
+def to_int(v):
+    try:
+        return int(float(v))
+    except Exception:
+        return 0
+
+
 def log(s=""):
     print(s)
     lines.append(str(s))
@@ -113,6 +120,51 @@ def main():
         rr = get(path)
         log(f"  {path} -> {rr.status_code if rr is not None else '실패'}"
             + (f"  {rr.text[:200]}" if rr is not None and rr.status_code == 200 else ""))
+
+    log("\n[같은 상품 안에 같은 사이즈가 여러 번 나오는지]")
+    dsz = 0
+    for p in prods:
+        c = collections.Counter(str(s.get("sizeRemark")) for s in (p.get("stocks") or []) if isinstance(s, dict))
+        d = {k: n for k, n in c.items() if n > 1}
+        if d:
+            dsz += 1
+            if dsz <= 5:
+                log(f"  {p.get('prodMark')} {p.get('colorName')}: {d}")
+    log(f"  중복 사이즈가 있는 상품행: {dsz}")
+
+    def summarize(ps):
+        ps = [x for x in (ps or []) if isinstance(x, dict)]
+        total = sum(to_int(s.get("stockNum")) for x in ps for s in (x.get("stocks") or []) if isinstance(s, dict))
+        marks = {str(x.get("prodMark", "")).upper() for x in ps}
+        sample = {}
+        for x in ps:
+            if str(x.get("prodMark", "")).upper() == "OZ3001" and str(x.get("colorName")) == "BLACK":
+                sample = {s.get("sizeRemark"): s.get("stockNum") for s in (x.get("stocks") or [])}
+        return len(ps), total, marks, sample
+
+    base = summarize(prods)
+    log(f"\n[창고별 조회 시도]  기본 /stocks: 행 {base[0]}, 재고합계 {base[1]}, OZ3001 BLACK {base[3]}")
+    for path, params in [("/stocks", {"warehouseId": 49}), ("/stocks", {"warehouseId": 55}),
+                         ("/stocks", {"warehouse_id": 55}), ("/stocks", {"warehouse": 55}),
+                         ("/stocks", {"warehouse": "CHINA"}), ("/stocks", {"whId": 55}),
+                         ("/stocks", {"wid": 55}), ("/stocks/55", None), ("/stocks/49", None),
+                         ("/warehouses/55/stocks", None), ("/warehouse/55/stocks", None)]:
+        rr = get(path, params)
+        if rr is None or rr.status_code != 200:
+            log(f"  {path} {params} -> {rr.status_code if rr is not None else '실패'}")
+            continue
+        try:
+            d = rr.json().get("data", [])
+            d = json.loads(d) if isinstance(d, str) else d
+        except Exception:
+            log(f"  {path} {params} -> 200 (JSON 아님) {rr.text[:100]}")
+            continue
+        sm = summarize(d)
+        same = "기본과 같음" if (sm[0], sm[1]) == (base[0], base[1]) else "기본과 다름!"
+        extra = sorted(sm[2] - base[2])
+        log(f"  {path} {params} -> 행 {sm[0]}, 재고합계 {sm[1]} ({same}) OZ3001 BLACK {sm[3]}"
+            + (f" 추가코드 {extra[:20]}" if extra else "")
+            + (f" OZ3005/3006 있음" if {"OZ3005", "OZ3006"} & sm[2] else ""))
 
     with open("ozlana_stock_summary.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
