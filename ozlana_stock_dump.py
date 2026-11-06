@@ -13,7 +13,7 @@ import requests
 
 OZLANA_BASE_URL = os.environ.get("OZLANA_BASE_URL") or "http://www.ozlanacms.com.au:30008"
 OZLANA_TOKEN = os.environ.get("OZLANA_TOKEN")
-CHECK_CODES = [c.strip().upper() for c in os.environ.get("CHECK_CODES", "OZ3005,OZ3006,OZ3008,OZ3035").split(",") if c.strip()]
+CHECK_CODES = [c.strip().upper() for c in os.environ.get("CHECK_CODES", "OZ0035,OZ0036,OZ3005,OZ3006").split(",") if c.strip()]
 WAREHOUSE_HINTS = ("ware", "house", "store", "stock", "location", "loc", "depot", "region",
                    "country", "cn", "china", "au", "site", "wh")
 
@@ -110,6 +110,17 @@ def main():
             sts = [(s.get("sizeRemark"), s.get("stockNum")) for s in (p.get("stocks") or []) if isinstance(s, dict)]
             log(f"  {code}: 색상 {p.get('colorName')} / 재고 {sts}")
             log(f"     원본: {json.dumps(p, ensure_ascii=False)[:600]}")
+
+    log("\n[전체 상품코드 목록]  코드 | 상품명 | 색상(재고합) | 사이즈 | 가격")
+    bycode = collections.OrderedDict()
+    for p in prods:
+        bycode.setdefault(str(p.get("prodMark", "")).strip().upper(), []).append(p)
+    for code in sorted(bycode):
+        ps = bycode[code]
+        cols = ", ".join(f"{str(x.get('colorName')).strip()}({sum(to_int(s.get('stockNum')) for s in (x.get('stocks') or []))})" for x in ps)
+        sizes = sorted({str(s.get("sizeRemark")) for x in ps for s in (x.get("stocks") or [])})
+        log(f"  {code} | {str(ps[0].get('prodName')).strip()} | {cols} | {' '.join(sizes)} | "
+            f"trade {ps[0].get('prodTradePrice')} min {ps[0].get('prodMinRetailPrice')} rrp {ps[0].get('prodMarketPrice')}")
 
     log("\n[예시 원본 2건]")
     for p in prods[:2]:
