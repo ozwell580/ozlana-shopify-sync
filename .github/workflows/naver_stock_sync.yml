@@ -22,6 +22,11 @@ on:
         description: "특정 상품코드만 (쉼표 구분, 비우면 전체)"
         required: false
         default: ""
+      include_single:
+        description: "옵션 없는 상품(가방·키링·머플러 등) 재고도 연동"
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -67,6 +72,8 @@ jobs:
         env:
           MODE: ${{ github.event_name == 'schedule' && 'apply' || github.event.inputs.mode || 'dry-run' }}
           ONLY_CODES: ${{ github.event.inputs.only_codes }}
+          # 예약 실행은 저장소 변수 NAVER_SINGLE_STOCK(on/off)로 켜고 끔. 수동 실행은 체크박스로
+          INCLUDE_SINGLE: ${{ github.event_name == 'schedule' && (vars.NAVER_SINGLE_STOCK || 'off') || (github.event.inputs.include_single == 'true' && 'on' || 'off') }}
           SYDNEY_CLIENT_ID: ${{ secrets.SYDNEY_CLIENT_ID }}
           SYDNEY_CLIENT_SECRET: ${{ secrets.SYDNEY_CLIENT_SECRET }}
           NAVER_PROXY: ${{ secrets.NAVER_PROXY }}

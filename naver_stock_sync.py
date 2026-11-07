@@ -16,7 +16,9 @@
   - 공급처 조회가 실패한 브랜드는 건너뜀 (재고 유지)
   - 한 브랜드에서 품절(0)로 바뀌는 옵션이 너무 많으면(기본 50% 초과) 공급처 이상으로 보고 그 브랜드는 건너뜀
   - 오즈웨어·오즈라나는 공급처에서 상품을 못 찾으면 재고 유지 (엑셀 방식과 같음)
-  - 조합형 옵션 상품만 처리. 옵션 없는 상품, 간편 입력 옵션, 단독형 옵션은 보고서에만 표시
+  - 조합형 옵션 상품은 옵션별 재고를 갱신
+  - 옵션 없는 상품·간편 입력 옵션 상품은 INCLUDE_SINGLE=on 일 때 '상품 재고'를 갱신
+    (공급처 같은 상품코드의 재고 합계, 규칙은 엑셀 방식의 '설정안함'과 같음). 단독형 옵션은 보고서에만 표시
 
 필요한 GitHub 시크릿
   SYDNEY_CLIENT_ID, SYDNEY_CLIENT_SECRET, NAVER_PROXY
@@ -45,6 +47,8 @@ PROXY = os.environ.get("NAVER_PROXY", "").strip()
 PROXIES = {"http": PROXY, "https": PROXY} if PROXY else None
 MODE = (os.environ.get("MODE") or "dry-run").strip().lower()
 MAX_ZERO_RATIO = float(os.environ.get("MAX_ZERO_RATIO", "0.5"))  # 브랜드별 품절 전환 비율 상한
+INCLUDE_SINGLE = (os.environ.get("INCLUDE_SINGLE") or "off").strip().lower() in ("on", "true", "1", "yes")
+SINGLE = "상품재고"  # 옵션 없는 상품의 재고 키
 ONLY_CODES = {c.strip().upper() for c in os.environ.get("ONLY_CODES", "").split(",") if c.strip()}
 REPORT_FILE = "naver_stock_report.txt"
 SLEEP = 0.25
@@ -165,11 +169,17 @@ def snapshot(d):
         "discount": discount_policy(d),
         "options": sorted((c.get("id"), c.get("optionName1"), c.get("optionName2"), c.get("optionName3"),
                            c.get("price"), bool(c.get("usable"))) for c in oi.get("optionCombinations") or []),
+        "simple": sorted(json.dumps(x, ensure_ascii=False, sort_keys=True) for x in oi.get("optionSimple") or []),
+        "standards": sorted(json.dumps(x, ensure_ascii=False, sort_keys=True) for x in oi.get("optionStandards") or []),
+        "name": o.get("name"),
     }
 
 
 def stocks_of(d):
-    return {c.get("id"): int(c.get("stockQuantity") or 0) for c in opt_info(d).get("optionCombinations") or []}
+    combos = opt_info(d).get("optionCombinations") or []
+    if not combos:
+        return {SINGLE: int(origin(d).get("stockQuantity") or 0)}
+    return {c.get("id"): int(c.get("stockQuantity") or 0) for c in combos}
 
 
 # ================================================================ 재고 계산 (엑셀 방식 규칙 그대로)
@@ -193,8 +203,10 @@ def plan_product(d, sup, R):
     combos = oi.get("optionCombinations") or []
     if not combos:
         kind = "간편 입력 옵션" if oi.get("optionSimple") else ("단독형 옵션" if oi.get("optionStandards") else "옵션 없음")
-        R[f"건너뜀: {kind} (재고 유지)"].append(f"[{brand}] {code}  {name}")
-        return brand, code, None
+        if kind == "단독형 옵션" or not INCLUDE_SINGLE:
+            R[f"건너뜀: {kind} (재고 유지)"].append(f"[{brand}] {code}  {name}")
+            return brand, code, None
+        return brand, code, plan_single(brand, code, name, kind, sup, R)
 
     is_oz = brand in S.OZ_BRANDS
     skus = sup[brand].get(S.OZ_CODE_ALIAS.get(code, code))
@@ -243,6 +255,40 @@ def plan_product(d, sup, R):
     return brand, code, new
 
 
+def plan_single(brand, code, name, kind, sup, R):
+    """옵션 없는 상품(간편 입력 옵션 포함): 공급처 같은 상품코드 재고 합계를 상품 재고로"""
+    is_oz = brand in S.OZ_BRANDS
+    skus = sup[brand].get(S.OZ_CODE_ALIAS.get(code, code))
+    if not skus:
+        if is_oz:
+            R["오즈 공급처에 없는 상품 (재고 유지)"].append(f"[{brand}] {code}  {name}")
+            return None
+        if brand == S.BRAND_EU and code in EVERUGG_MODELS:
+            R["에버어그 재고 API엔 없지만 가격표에 있는 상품 (재고 유지)"].append(f"[{brand}] {code}  {name}")
+            return None
+        R["공급처에 없는 상품 (전체 품절)"].append(f"[{brand}] {code}  {name}")
+        return {SINGLE: 0}
+    colors = sorted({str(s["color"]) for s in skus})
+    if len(colors) > 1:
+        R["옵션 없는 상품인데 공급처 색상이 여러 개 (합계로 반영, 확인 권장)"].append(
+            f"[{brand}] {code}  {name}  (공급처 색상: {', '.join(colors)})")
+    R[f"옵션 없는 상품 재고 연동 ({kind})"].append(f"[{brand}] {code}  {name}")
+    return {SINGLE: S.final_qty(sum(s["stock"] for s in skus))}
+
+
+def build_single_body(d, q):
+    """옵션 없는 상품: 현재 값은 그대로 두고 상품 재고만 바꾼 요청"""
+    o = origin(d)
+    oi = opt_info(d)
+    body = {"productSalePrice": {"salePrice": o.get("salePrice")}, "stockQuantity": q}
+    if oi.get("optionSimple"):
+        body["optionInfo"] = {"optionSimple": oi["optionSimple"]}
+    disc = discount_policy(d)
+    if disc:
+        body["immediateDiscountPolicy"] = disc
+    return body
+
+
 def build_body(d, new):
     """현재 값은 그대로 두고 재고만 바꾼 요청"""
     o = origin(d)
@@ -269,7 +315,7 @@ def main():
         sys.exit("SYDNEY_CLIENT_ID / SYDNEY_CLIENT_SECRET 시크릿이 없습니다.")
     if MODE not in ("dry-run", "test-one", "apply"):
         sys.exit(f"MODE 값이 잘못됐습니다: {MODE}")
-    print(f"모드: {MODE}")
+    print(f"모드: {MODE}  /  옵션 없는 상품 연동: {'켜짐' if INCLUDE_SINGLE else '꺼짐'}")
     nv = Naver()
     nv.token()
     items = nv.list_products()
@@ -342,13 +388,18 @@ def main():
     if MODE in ("test-one", "apply") and plans:
         if MODE == "test-one":
             # 첫 시험은 할인 설정이 없는 상품으로 (할인 값 처리를 확인하기 전까지)
-            plain = [p for p in plans if not discount_policy(p[3])]
-            todo = (plain or plans)[:1]
+            # 옵션 없는 상품 연동을 켰으면 그 상품부터 시험
+            pool = plans
+            if INCLUDE_SINGLE and any(SINGLE in p[4] for p in plans):
+                pool = [p for p in plans if SINGLE in p[4]]
+            plain = [p for p in pool if not discount_policy(p[3])]
+            todo = (plain or pool)[:1]
         else:
             todo = plans
         for brand, code, no, d, new, changes in todo:
             before = snapshot(d)
-            r = nv.put_option_stock(no, build_body(d, new))
+            body = build_single_body(d, new[SINGLE]) if SINGLE in new else build_body(d, new)
+            r = nv.put_option_stock(no, body)
             time.sleep(SLEEP)
             if r is None or r.status_code not in (200, 204):
                 failed += 1
@@ -380,12 +431,13 @@ def main():
     order = ["❌ 재고 말고 다른 값이 바뀜 -> 즉시 중단", "❌ 변경 실패", "❌ 변경 후 확인 실패", "⚠️ 재고가 예상과 다름",
              "⚠️ 공급처 이상 의심으로 건너뛴 브랜드", "✅ 변경 완료", "재고 변경 예정", "재고 변경 대상",
              "공급처에 없는 상품 (전체 품절)", "공급처에 없는 색상 (품절)", "공급처에 없는 사이즈 (품절)",
+             "옵션 없는 상품인데 공급처 색상이 여러 개 (합계로 반영, 확인 권장)",
              "추정 매칭 색상 (확인 권장)", "에버어그 재고 API엔 없지만 가격표에 있는 상품 (재고 유지)",
              "오즈 공급처에 없는 상품 (재고 유지)",
              "건너뜀: 옵션 없음 (재고 유지)", "건너뜀: 단독형 옵션 (재고 유지)", "건너뜀: 간편 입력 옵션 (재고 유지)",
              "상세 조회 실패 (건너뜀)", "다른 브랜드 (건너뜀)"]
     order += [k for k in R if k not in order]
-    summary = [f"모드: {MODE}", f"시드니셀러 상품: {len(items)}  (처리 대상 {len(targets)})",
+    summary = [f"모드: {MODE}  /  옵션 없는 상품 연동: {'켜짐' if INCLUDE_SINGLE else '꺼짐'}", f"시드니셀러 상품: {len(items)}  (처리 대상 {len(targets)})",
                f"재고가 바뀌는 상품: {len(plans)}개 / 옵션 {sum(len(p[5]) for p in plans)}개",
                f"브랜드별: " + ", ".join(f"{b} {sum(1 for p in plans if p[0] == b)}" for b in
                                      (S.BRAND_DK, S.BRAND_EU, S.BRAND_OW, S.BRAND_OL)),
