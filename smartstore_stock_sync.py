@@ -168,12 +168,14 @@ KO_COLOR_SUFFIX = {"네이처퍼": "Nature Fur", "내추럴퍼": "Nature Fur"}
 # 상품별 색상 연결 (상품코드, 띄어쓰기 뺀 한글 색상) -> 공급처 색상
 PRODUCT_COLOR_ALIAS = {
     ("DK098A", "체스트넛"): "Chestnut(RED)",
+    ("DK098", "밸리브라운"): "Vally Brown/Pink",
+    ("DK163", "체스트넛"): "Cream/Chestnut",
     ("OZ8004", "토프"): "MUSHROOM",
     ("OZ8007", "토프"): "MUSHROOM",
     ("OZ8011", "토프"): "MUSHROOM",
 }
 # 스마트스토어 코드 -> 공급처 코드
-OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX"}
+OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX", "OZ658K": "OB658K", "OB936": "OB936W"}
 # 오즈라나 S/M/L 상품 -> 공급처 4#/5#/6#
 OZ_SML_CODES = {f"OZ80{n:02d}" for n in range(1, 15)}  # OZ8001~OZ8014
 OZ_SML_MAP = {"S": "AU4", "M": "AU5", "L": "AU6"}
@@ -481,7 +483,10 @@ def fetch_ozwear():
                 names = [str(o.get("name", "")).lower() for o in p.get("options") or []]
                 c_i = next((i for i, n in enumerate(names) if "colo" in n or "색" in n), None)
                 s_i = next((i for i, n in enumerate(names) if "size" in n or "사이즈" in n), None)
-                title_codes = {m.upper() for m in CODE_RE.findall(str(p.get("title", "")).upper())}
+                title_up = str(p.get("title", "")).upper()
+                title_codes = {m.upper() for m in CODE_RE.findall(title_up)}
+                # 상품명 코드가 'OB092 II' 처럼 띄어 쓰여 있으면 'OB092II' 로도 찾을 수 있게 붙여서 추가
+                title_codes |= {a + b for a, b in re.findall(r"\b([A-Z]{1,4}\d+[A-Z]*)\s+(II|III)\b", title_up)}
                 for v in p.get("variants") or []:
                     sku = str(v.get("sku") or "").strip()
                     if not sku:
