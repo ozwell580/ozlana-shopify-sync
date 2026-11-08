@@ -36,6 +36,12 @@ MODE = (os.environ.get("MODE") or "dry-run").strip().lower()
 CODES = [c.strip().upper() for c in (os.environ.get("CODES") or "").split(",") if c.strip()]
 REF_CODE = (os.environ.get("REF_CODE") or "OB1145").strip().upper()
 PRICE_MULTIPLIER = float(os.environ.get("PRICE_MULTIPLIER") or "1.1")
+# 코드별 도매가(GST 별도) 직접 입력: "OB1136=47,OB1062=66"  -> 도매가 x PRICE_MULTIPLIER(GST 10%)
+PRICES = {}
+for _x in (os.environ.get("PRICES") or "").split(","):
+    if "=" in _x:
+        _k, _v = _x.split("=", 1)
+        PRICES[_k.strip().upper()] = float(_v.strip().replace("$", ""))
 VENDOR = "OZWEAR UGG"
 API_VERSION = "2024-01"
 SIZE_GUIDE = '<p><a href="https://ugg-aus.myshopify.com/pages/ozwear-size-guide-chart">사이즈 가이드 보기</a></p>'
@@ -146,7 +152,7 @@ def product_type_of(title):
 
 def build_product(code, items):
     first = items[0]
-    name = str(first.get("name") or "").strip().upper()
+    name = re.sub(r"\s+", " ", str(first.get("name") or "")).strip().upper()
     if not name.startswith("UGG") and not name.startswith("KIDS"):
         name = f"UGG {name}"
     title = f"{name} ({code})"
@@ -165,7 +171,7 @@ def build_product(code, items):
         if not sku or (color, size) in seen:
             continue
         seen.add((color, size))
-        base = to_float(it.get(pk)) if pk else None
+        base = PRICES.get(code) or (to_float(it.get(pk)) if pk else None)
         price = round(base * PRICE_MULTIPLIER, 2) if base else None
         variants.append({"option1": color, "option2": size, "sku": sku, "barcode": sku,
                          "price": f"{price:.2f}" if price else None,

@@ -15,6 +15,10 @@ on:
         description: "등록할 스타일 코드 (쉼표 구분)"
         required: true
         default: "OB1022,OB1053,OB1061,OB1062,OB1064,OB1066,OB1070,OB1080,OB1084,OB1094,OB1095,OB1123,OB1136,OB939K"
+      prices:
+        description: "코드별 도매가(GST 별도) 예: OB1136=47,OB1062=66"
+        required: false
+        default: ""
       price_multiplier:
         description: "오즈웨어 API 가격에 곱할 배수 (기존 상품 기준 1.1)"
         required: false
@@ -38,6 +42,7 @@ jobs:
           MODE: ${{ github.event.inputs.mode }}
           CODES: ${{ github.event.inputs.codes }}
           PRICE_MULTIPLIER: ${{ github.event.inputs.price_multiplier }}
+          PRICES: ${{ github.event.inputs.prices }}
           OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
           OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
           SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
