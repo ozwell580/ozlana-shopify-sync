@@ -1,0 +1,54 @@
+name: 오즈웨어 신상 Shopify 등록 (API)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run = 미리보기만 / apply = 실제 등록"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - "dry-run"
+          - "apply"
+      codes:
+        description: "등록할 스타일 코드 (쉼표 구분)"
+        required: true
+        default: "OB1022,OB1053,OB1061,OB1062,OB1064,OB1066,OB1070,OB1080,OB1084,OB1094,OB1095,OB1123,OB1136,OB939K"
+      price_multiplier:
+        description: "오즈웨어 API 가격에 곱할 배수 (기존 상품 기준 1.1)"
+        required: false
+        default: "1.1"
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Create products
+        env:
+          MODE: ${{ github.event.inputs.mode }}
+          CODES: ${{ github.event.inputs.codes }}
+          PRICE_MULTIPLIER: ${{ github.event.inputs.price_multiplier }}
+          OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
+          OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python create_ozwear_products.py
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: create_ozwear_report
+          path: create_ozwear_report.txt
+          if-no-files-found: ignore
+          retention-days: 14
