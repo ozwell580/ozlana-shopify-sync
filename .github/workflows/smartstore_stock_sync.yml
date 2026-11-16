@@ -1,4 +1,4 @@
-name: Smartstore Stock File (DK + EverUgg + Ozwear + Ozlana)
+name: Smartstore + 11st Stock File (DK + EverUgg + Ozwear + Ozlana)
 
 on:
   workflow_dispatch:
@@ -73,4 +73,23 @@ jobs:
           path: |
             sydneyseller_stock_upload*.xlsx
             sydneyseller_stock_report.txt
+          retention-days: 14
+
+      # ---------------- 11번가 (forms_11st/)
+      # forms_11st 폴더에 파일이 있을 때만 실행. DK·에버어그 재고는 위에서 받은 것을 다시 씀 (USE_CACHE)
+      - name: Build 11st upload file
+        if: ${{ hashFiles('forms_11st/*.xlsx') != '' }}
+        env:
+          USE_CACHE: "1"
+        run: python eleven_stock_sync.py
+
+      - name: Upload 11st files
+        if: ${{ hashFiles('forms_11st/*.xlsx') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 11st_stock_${{ env.TS }}
+          path: |
+            11st_stock_upload*.xlsx
+            11st_stock_test1.xlsx
+            11st_stock_report.txt
           retention-days: 14
