@@ -118,7 +118,7 @@ COLOR_MAP = {
     "잉크네이비": "Ink Navy", "차콜그레이": "Charcoal Grey", "체스트넛": "Chestnut",
     "체스넛": "Chestnut", "체스트넛레드": "Chestnut/Red", "체스트넛베이지": "Chestnut-Beige",
     "체스트넛브라운": "Chestnut/Brown", "체스트넛크림": "Chestnut Cream",
-    "체스트넛모스그린": "Chestnut Moss green", "초콜릿": "Chocolate", "초콜렛": "Chocolate",
+    "체스트넛모스그린": "Chestnut Moss green", "초콜릿": "Chocolate", "초콜렛": "Chocolate", "초코렛": "Chocolate",
     "카놀라": "Canola", "카라멜": "Caramel", "카라멜브라운": "Caramel Brown", "카리부": "Caribou",
     "칼리보": "Caribou", "카멜": "Camel", "카키": "Khaki", "커스터드": "Custard",
     "커피": "Coffee", "컬러블록블루": "Colorblock Blue", "코코아": "Cocoa", "쿠퍼": "Copper",
