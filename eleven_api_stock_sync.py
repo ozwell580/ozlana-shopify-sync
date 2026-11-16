@@ -59,12 +59,15 @@ def strip_ns(el):
 
 
 def parse(r):
+    """11번가 응답은 euc-kr XML -> 글자로 바꾼 뒤 선언부를 떼고 읽음"""
+    raw = r.content
     try:
-        return strip_ns(ET.fromstring(r.content))
-    except ET.ParseError:
-        txt = r.content.decode("euc-kr", errors="replace")
-        txt = txt.replace("ns2:", "")
-        return strip_ns(ET.fromstring(txt.split("?>", 1)[-1].encode("utf-8")))
+        txt = raw.decode("euc-kr")
+    except UnicodeDecodeError:
+        txt = raw.decode("utf-8", errors="replace")
+    if txt.lstrip().startswith("<?xml"):
+        txt = txt.split("?>", 1)[1]
+    return strip_ns(ET.fromstring(txt))
 
 
 class Eleven:
