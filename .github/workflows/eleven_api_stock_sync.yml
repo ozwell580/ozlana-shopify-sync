@@ -44,6 +44,10 @@ jobs:
         run: |
           IP=$(curl -s --max-time 20 -x "$NAVER_PROXY" https://api.ipify.org || true)
           echo "고정 IP: ${IP//./ . }"
+          for u in https://api.11st.co.kr/rest/prodmarketservice/prodmarket/stck/1 http://api.11st.co.kr/rest/prodmarketservice/prodmarket/stck/1 https://api.commerce.naver.com https://www.google.com; do
+            echo "== $u : $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -x "$NAVER_PROXY" "$u" || echo fail)"
+            curl -s --max-time 20 -x "$NAVER_PROXY" "$u" 2>&1 | grep -o '<title>[^<]*' | head -1 || true
+          done
 
       - name: Run 11st stock sync
         env:
