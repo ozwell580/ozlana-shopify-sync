@@ -38,6 +38,13 @@ jobs:
       - name: Install packages
         run: pip install requests openpyxl
 
+      - name: Show fixed IP (11번가 상용서버 IP에 등록할 주소)
+        env:
+          NAVER_PROXY: ${{ secrets.NAVER_PROXY }}
+        run: |
+          IP=$(curl -s --max-time 20 -x "$NAVER_PROXY" https://api.ipify.org || true)
+          echo "고정 IP: ${IP//./ . }"
+
       - name: Run 11st stock sync
         env:
           MODE: ${{ github.event.inputs.mode || 'dry-run' }}
