@@ -137,8 +137,12 @@ def split_option(opt):
 
 def plan(p, sup, R):
     """새 옵션재고 리스트 (옵션 순서 그대로) / 옵션 없으면 [합계] / None = 건드리지 않음"""
-    name = str(p["상품명"] or "")
-    code = code_of(name)
+    return plan_opts(str(p["상품명"] or ""), lines(p["옵션값(수정불가)"]), sup, R)
+
+
+def plan_opts(name, opts, sup, R, code=None):
+    """name: 상품명, opts: 옵션값 리스트('색상,사이즈'), code: 판매자상품코드(없으면 상품명에서)"""
+    code = (code or "").strip().upper() or code_of(name)
     brand = brand_of(name, code)
     tag = f"[{brand or '-'}] {code}  {name}"
     if brand not in sup:
@@ -150,7 +154,6 @@ def plan(p, sup, R):
         R["상품명에서 상품코드를 못 찾음 (건너뜀)"].append(tag)
         return brand, code, None
 
-    opts = lines(p["옵션값(수정불가)"])
     is_oz = brand in S.OZ_BRANDS
     skus = sup[brand].get(S.OZ_CODE_ALIAS.get(code, code))
     if not skus:
