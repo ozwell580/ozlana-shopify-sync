@@ -40,6 +40,7 @@ PRICE_RATE = 1.13
 FEE_11ST = 0.13          # 11번가 기본서비스이용율 (정산내역 기준)
 FX = 1000                # 원가 계산용 환율 (보수적으로 1 AUD = 1,000원)
 IMG = "https://cdn.jsdelivr.net/gh/ozwell580/market-images@main"
+RAW = "https://raw.githubusercontent.com/ozwell580/market-images/main"  # 대표이미지 예비 주소
 REPORT = "11st_ozlana_report.txt"
 PRICES = "11st_ozlana_prices.csv"
 
@@ -109,7 +110,7 @@ def options_of(d):
     return names, combos
 
 
-def build_xml(d, code, ctg, p11, fee, stock_total):
+def build_xml(d, code, ctg, p11, fee, stock_total, main_img=None):
     o = d.get("originProduct") or {}
     name = (o.get("name") or "").strip()[:100]
     names, combos = options_of(d)
@@ -124,7 +125,7 @@ def build_xml(d, code, ctg, p11, fee, stock_total):
          f"<sellerPrdCd>{code}</sellerPrdCd>", "<suplDtyfrPrdClfCd>01</suplDtyfrPrdClfCd>",
          "<forAbrdBuyClf>01</forAbrdBuyClf>", "<importFeeCd>03</importFeeCd>",
          "<prdStatCd>01</prdStatCd>", "<minorSelCnYn>Y</minorSelCnYn>",
-         f"<prdImage01>{IMG}/OZLANA/{code}/{code}_main_1.jpg</prdImage01>",
+         f"<prdImage01>{main_img or IMG + '/OZLANA/' + code + '/' + code + '_main_1.jpg'}</prdImage01>",
          "<htmlDetail>" + cdata(detail_html(d, code)) + "</htmlDetail>"]
     for g, obj in (("01", "03"), ("02", "03"), ("03", "03"), ("04", "05")):
         x.append(f"<ProductCertGroup><crtfGrpTypCd>{g}</crtfGrpTypCd><crtfGrpObjClfCd>{obj}</crtfGrpObjClfCd></ProductCertGroup>")
@@ -263,12 +264,21 @@ def main():
                 out.append(f"❌ {code} 옵션값에 쓸 수 없는 특수문자: {bad[:3]}")
                 fail += 1
                 continue
-            main_img = f"{IMG}/OZLANA/{code}/{code}_main_1.jpg"
-            if not img_ok(main_img):
+            main_img = None
+            for base in (IMG, RAW):
+                u = f"{base}/OZLANA/{code}/{code}_main_1.jpg"
+                for _ in range(3):
+                    if img_ok(u):
+                        main_img = u
+                        break
+                    time.sleep(3)
+                if main_img:
+                    break
+            if not main_img:
                 out.append(f"❌ {code} 대표이미지 없음: {main_img}")
                 fail += 1
                 continue
-            xml = build_xml(d, code, ctg, p11, fee, sum(int(c.get("stockQuantity") or 0) for c in combos) or 1)
+            xml = build_xml(d, code, ctg, p11, fee, sum(int(c.get("stockQuantity") or 0) for c in combos) or 1, main_img)
             r = api.req("POST", "/prodservices/product", xml)
             try:
                 root = A.parse(r)
