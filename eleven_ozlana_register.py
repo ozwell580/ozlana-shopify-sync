@@ -154,7 +154,7 @@ def build_xml(d, code, ctg, p11, fee, stock_total):
           f"<dlvCst1>{fee}</dlvCst1>", f"<dlvCst4>{fee}</dlvCst4>", "<dlvCnt1>1</dlvCnt1>",
           "<bndlDlvCnYn>N</bndlDlvCnYn>", "<dlvCstPayTypCd>03</dlvCstPayTypCd>",
           "<jejuDlvCst>0</jejuDlvCst>", "<islandDlvCst>0</islandDlvCst>",
-          "<addrSeqOut>2</addrSeqOut>", "<addrSeqIn>3</addrSeqIn>",
+          "<addrSeqOut>2</addrSeqOut>", "<outsideYnOut>Y</outsideYnOut>", "<addrSeqIn>3</addrSeqIn>", "<outsideYnIn>Y</outsideYnIn>",
           "<rtngdDlvCst>25000</rtngdDlvCst>", "<exchDlvCst>50000</exchDlvCst>", "<rtngdDlvCd>01</rtngdDlvCd>",
           "<asDetail>" + cdata(AS_DETAIL) + "</asDetail>", "<rtngExchDetail>" + cdata(RTNG_DETAIL) + "</rtngExchDetail>",
           "<dlvClf>02</dlvClf>"]
