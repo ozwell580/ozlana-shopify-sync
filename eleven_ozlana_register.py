@@ -128,7 +128,11 @@ def build_xml(d, code, ctg, p11, fee, stock_total):
          "<htmlDetail>" + cdata(detail_html(d, code)) + "</htmlDetail>"]
     for g, obj in (("01", "03"), ("02", "03"), ("03", "03"), ("04", "05")):
         x.append(f"<ProductCertGroup><crtfGrpTypCd>{g}</crtfGrpTypCd><crtfGrpObjClfCd>{obj}</crtfGrpObjClfCd></ProductCertGroup>")
+    import datetime
+    today = datetime.datetime.utcnow() + datetime.timedelta(hours=9)  # 한국 날짜
+    end = today.replace(year=today.year + 3) - datetime.timedelta(days=1)
     x += ["<reviewDispYn>Y</reviewDispYn>", "<selPrdClfCd>3y:110</selPrdClfCd>",
+          f"<aplBgnDy>{today:%Y/%m/%d}</aplBgnDy>", f"<aplEndDy>{end:%Y/%m/%d}</aplEndDy>",
           f"<selPrc>{p11}</selPrc>"]
     if combos:
         x += ["<optSelectYn>Y</optSelectYn>", "<txtColCnt>1</txtColCnt>",
