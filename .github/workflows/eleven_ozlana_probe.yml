@@ -2,6 +2,11 @@ name: 11번가 오즈라나 등록 준비 조회 (읽기 전용)
 
 on:
   workflow_dispatch:
+    inputs:
+      script:
+        description: "실행할 파일"
+        required: false
+        default: "eleven_ozlana_probe.py"
 
 permissions:
   contents: read
@@ -22,4 +27,6 @@ jobs:
           NAVER_PROXY: ${{ secrets.NAVER_PROXY }}
           SYDNEY_CLIENT_ID: ${{ secrets.SYDNEY_CLIENT_ID }}
           SYDNEY_CLIENT_SECRET: ${{ secrets.SYDNEY_CLIENT_SECRET }}
-        run: python eleven_ozlana_probe.py
+          OZLANA_TOKEN: ${{ secrets.OZLANA_TOKEN }}
+          OZLANA_BASE_URL: ${{ secrets.OZLANA_BASE_URL }}
+        run: python ${{ github.event.inputs.script || 'eleven_ozlana_probe.py' }}
