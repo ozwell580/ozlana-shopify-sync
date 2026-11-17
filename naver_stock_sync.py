@@ -132,6 +132,10 @@ class Naver:
     def put_option_stock(self, origin_no, body):
         return self.call("PUT", f"/v1/products/origin-products/{origin_no}/option-stock", body)
 
+    def put_product(self, origin_no, body):
+        """원상품 전체 수정 (옵션 없는 상품의 재고는 이 방식으로만 바꿀 수 있음)"""
+        return self.call("PUT", f"/v2/products/origin-products/{origin_no}", body)
+
 
 # ================================================================ 상품 정보 꺼내기
 def origin(d):
@@ -277,15 +281,11 @@ def plan_single(brand, code, name, kind, sup, R):
 
 
 def build_single_body(d, q):
-    """옵션 없는 상품: 현재 값은 그대로 두고 상품 재고만 바꾼 요청"""
-    o = origin(d)
-    oi = opt_info(d)
-    body = {"productSalePrice": {"salePrice": o.get("salePrice")}, "stockQuantity": q}
-    if oi.get("optionSimple"):
-        body["optionInfo"] = {"optionSimple": oi["optionSimple"]}
-    disc = discount_policy(d)
-    if disc:
-        body["immediateDiscountPolicy"] = disc
+    """옵션 없는 상품: 조회한 상품 정보 전체를 그대로 두고 상품 재고(stockQuantity)만 바꾼 요청.
+    옵션 재고 API(option-stock)는 optionInfo가 꼭 있어야 해서 옵션 없는 상품엔 쓸 수 없음
+    -> 원상품 전체 수정 API(PUT /v2/products/origin-products/{번호})로 보냄"""
+    body = json.loads(json.dumps(d))  # 깊은 복사
+    body["originProduct"]["stockQuantity"] = q
     return body
 
 
@@ -398,15 +398,17 @@ def main():
             todo = plans
         for brand, code, no, d, new, changes in todo:
             before = snapshot(d)
-            body = build_single_body(d, new[SINGLE]) if SINGLE in new else build_body(d, new)
-            r = nv.put_option_stock(no, body)
+            if SINGLE in new:
+                r = nv.put_product(no, build_single_body(d, new[SINGLE]))
+            else:
+                r = nv.put_option_stock(no, build_body(d, new))
             time.sleep(SLEEP)
             if r is None or r.status_code not in (200, 204):
                 failed += 1
                 R["❌ 변경 실패"].append(f"[{brand}] {code}  HTTP {getattr(r, 'status_code', '?')} "
                                        f"{getattr(r, 'text', '')[:400]}")
                 if failed >= 5:
-                    R["❌ 변경 실패"].append("실패가 5건이라 중단함")
+                    R["❌ 실패 5건이라 중단함"].append(f"실패 {failed}건에서 멈춤 - 나머지 상품은 바꾸지 않음")
                     break
                 continue
             after_d, err = nv.get(no)
@@ -428,7 +430,8 @@ def main():
             R["✅ 변경 완료"].append(f"[{brand}] {code}  옵션 {len(changes)}개")
 
     # 보고서
-    order = ["❌ 재고 말고 다른 값이 바뀜 -> 즉시 중단", "❌ 변경 실패", "❌ 변경 후 확인 실패", "⚠️ 재고가 예상과 다름",
+    order = ["❌ 재고 말고 다른 값이 바뀜 -> 즉시 중단", "❌ 변경 실패", "❌ 변경 후 확인 실패", "❌ 실패 5건이라 중단함",
+             "⚠️ 재고가 예상과 다름",
              "⚠️ 공급처 이상 의심으로 건너뛴 브랜드", "✅ 변경 완료", "재고 변경 예정", "재고 변경 대상",
              "공급처에 없는 상품 (전체 품절)", "공급처에 없는 색상 (품절)", "공급처에 없는 사이즈 (품절)",
              "옵션 없는 상품인데 공급처 색상이 여러 개 (합계로 반영, 확인 권장)",
