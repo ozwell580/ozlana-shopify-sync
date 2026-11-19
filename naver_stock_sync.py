@@ -16,6 +16,7 @@
   - 공급처 조회가 실패한 브랜드는 건너뜀 (재고 유지)
   - 한 브랜드에서 품절(0)로 바뀌는 옵션이 너무 많으면(기본 50% 초과) 공급처 이상으로 보고 그 브랜드는 건너뜀
   - 오즈웨어·오즈라나는 공급처에서 상품을 못 찾으면 재고 유지 (엑셀 방식과 같음)
+  - 옵션 없는 상품이 품절 상태면 판매중으로 보내서 재고 반영 (품절 상태값은 네이버가 거부함)
   - 조합형 옵션 상품은 옵션별 재고를 갱신
   - 옵션 없는 상품·간편 입력 옵션 상품은 INCLUDE_SINGLE=on 일 때 '상품 재고'를 갱신
     (공급처 같은 상품코드의 재고 합계, 규칙은 엑셀 방식의 '설정안함'과 같음). 단독형 옵션은 보고서에만 표시
@@ -67,6 +68,66 @@ def load_everugg_models(path="everugg_models.txt"):
 
 
 EVERUGG_MODELS = load_everugg_models()
+
+# ---------------------------------------------------------------- 추가 매칭 규칙
+# 한글 색상명 -> 공급처 영문 색상 (smartstore_stock_sync.py 변환표에 없는 것 보충)
+#   공급처 그 상품에 그 영문 색상이 실제로 있을 때만 맞춤
+COLOR_EXTRA = {
+    "더스티로즈": "DUSTY ROSE",
+    "퍼플": "PURPLE",
+    "타로": "TARO",
+    "로즈": "ROSE",
+    "히비스커스": "HIBISCUS",
+}
+
+# 상품코드별로 확인 끝난 색상 매칭 (추정 매칭 -> 확정)
+CODE_COLOR_FIX = {
+    ("OB114II", "브라운"): "ROSY BROWN",
+    ("OZ7012", "실버"): "SILVERY",
+    ("OZ5021", "카멜"): "CHOCOLATE/CAMEL",
+    ("OZ5021", "초콜릿"): "CHOCOLATE/CAMEL",
+    ("AS8003", "프라신그린"): "Prasine Check",
+}
+
+# 스마트스토어 브랜드 표기가 달라도 이 브랜드로 연동
+BRAND_OVERRIDE = {
+    "OZ3035": S.BRAND_OL,  # 스토어 브랜드가 '어그'로 되어 있음 -> 오즈라나
+}
+
+# 상품 수정 때 네이버가 받지 않는 판매상태 (네이버가 재고에 따라 자동으로 정함)
+AUTO_STATUS = {"OUTOFSTOCK"}
+
+
+def _norm(s):
+    return re.sub(r"[\s_\-]+", "", str(s)).upper()
+
+
+def match_color(skus, ko, code):
+    """추가 규칙으로 공급처 색상 찾기. 못 찾으면 None (기존 변환표로 넘어감)"""
+    want = CODE_COLOR_FIX.get((code, ko)) or COLOR_EXTRA.get(str(ko).replace(" ", ""))
+    if not want:
+        return None
+    for s in skus:
+        if _norm(s["color"]) == _norm(want):
+            return s["color"]
+    return None
+
+
+def mens_size_fallback(skus, en, sz):
+    """오즈웨어 남성 사이즈 보충: 스토어 '남성AU9' <-> 공급처 '42(9M)'
+    기존 규칙으로 못 찾은 경우에만 씀. 반환 (재고, 찾음여부)"""
+    m = re.search(r"AU\s*(\d+)", str(sz), re.I)
+    if not m or "남성" not in str(sz):
+        return 0, False
+    pat = re.compile(r"\(\s*%s\s*M\s*\)" % m.group(1), re.I)
+    q, found = 0, False
+    for x in skus:
+        if en is not None and x["color"] != en:
+            continue
+        if any(isinstance(v, str) and pat.search(v) for k, v in x.items() if k != "color"):
+            q += int(x.get("stock") or 0)
+            found = True
+    return q, found
 
 
 # ================================================================ 네이버 API
@@ -199,6 +260,8 @@ def plan_product(d, sup, R):
         m = S.CODE_RE.search(name.upper())
         code = m.group(1).upper() if m else ""
     brand = S.brand_of([brand_name(d), name, code], COL)
+    if code in BRAND_OVERRIDE:
+        brand = BRAND_OVERRIDE[code]
     if brand not in sup:
         return brand, code, None
     if ONLY_CODES and code not in ONLY_CODES:
@@ -237,8 +300,10 @@ def plan_product(d, sup, R):
         en, ok = None, True
         if ko is not None:
             if ko not in color_cache:
-                en_c, guess = S.find_color(skus, ko, allow_guess=(brand != S.BRAND_DK),
-                                           allow_single=not is_oz, code=code)
+                en_c, guess = match_color(skus, ko, code), False
+                if en_c is None:
+                    en_c, guess = S.find_color(skus, ko, allow_guess=(brand != S.BRAND_DK),
+                                               allow_single=not is_oz, code=code)
                 if en_c is None:
                     R["공급처에 없는 색상 (품절)"].append(f"[{brand}] {code}  '{ko}'  (공급처 색상: {colors_all})")
                 elif guess:
@@ -253,6 +318,10 @@ def plan_product(d, sup, R):
             q = sum(x["stock"] for x in skus if en is None or x["color"] == en)
         else:
             q, found = S.size_stock(skus, en, sz, oz=is_oz, code=code)
+            if not found and is_oz:
+                q2, found2 = mens_size_fallback(skus, en, sz)
+                if found2:
+                    q, found = q2, True
             if not found and c.get("usable"):
                 R["공급처에 없는 사이즈 (품절)"].append(f"[{brand}] {code}  '{ko or ''}/{sz}'")
         new[c["id"]] = S.final_qty(q)
@@ -285,7 +354,12 @@ def build_single_body(d, q):
     옵션 재고 API(option-stock)는 optionInfo가 꼭 있어야 해서 옵션 없는 상품엔 쓸 수 없음
     -> 원상품 전체 수정 API(PUT /v2/products/origin-products/{번호})로 보냄"""
     body = json.loads(json.dumps(d))  # 깊은 복사
-    body["originProduct"]["stockQuantity"] = q
+    o = body["originProduct"]
+    o["stockQuantity"] = q
+    # 품절(OUTOFSTOCK)은 네이버가 자동으로 정하는 상태라 요청에 넣으면 400 오류가 남
+    # -> 판매중(SALE)으로 보내면 재고 0이면 네이버가 다시 품절로, 1 이상이면 판매중으로 둠
+    if o.get("statusType") in AUTO_STATUS:
+        o["statusType"] = "SALE"
     return body
 
 
