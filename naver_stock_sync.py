@@ -54,6 +54,14 @@ ONLY_CODES = {c.strip().upper() for c in os.environ.get("ONLY_CODES", "").split(
 REPORT_FILE = "naver_stock_report.txt"
 SLEEP = 0.25
 
+# GitHub Actions에서도 출력이 바로바로 보이게 (끝날 때 몰아서 나오지 않게)
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
+size_debug_done = set()  # 공급처 사이즈 원본을 보고서에 한 번만 남기기 위한 기록
+
 KEEP_STATUS = {"SALE", "OUTOFSTOCK"}  # 판매중·품절 상품만 처리 (판매중지·삭제 등은 건너뜀)
 
 
@@ -94,6 +102,11 @@ BRAND_OVERRIDE = {
     "OZ3035": S.BRAND_OL,  # 스토어 브랜드가 '어그'로 되어 있음 -> 오즈라나
 }
 
+# 연동에서 빼는 상품 (스토어에 직접 넣은 재고를 그대로 둠)
+SKIP_CODES = {
+    "OZ3035",  # 공급처 재고 없음. 품절되면 안 보여서 일부러 재고를 넣어 둔 상품
+}
+
 # 상품 수정 때 네이버가 받지 않는 판매상태 (네이버가 재고에 따라 자동으로 정함)
 AUTO_STATUS = {"OUTOFSTOCK"}
 
@@ -113,18 +126,31 @@ def match_color(skus, ko, code):
     return None
 
 
+def sku_texts(x):
+    """공급처 SKU에서 색상·재고 말고 글자로 된 값들 (사이즈 표기 찾기용)"""
+    return [str(v) for k, v in x.items() if k not in ("color", "stock") and isinstance(v, (str, int)) and str(v).strip()]
+
+
 def mens_size_fallback(skus, en, sz):
-    """오즈웨어 남성 사이즈 보충: 스토어 '남성AU9' <-> 공급처 '42(9M)'
-    기존 규칙으로 못 찾은 경우에만 씀. 반환 (재고, 찾음여부)"""
+    """오즈웨어 남성 사이즈 보충: 스토어 '남성AU9' <-> 공급처 '42(9M)' / '9M' / 'M9' / 'AU9' / 'EU42' 등
+    (남성 AU6 = EU39, AU9 = EU42 ...) 기존 규칙으로 못 찾은 경우에만 씀. 반환 (재고, 찾음여부)"""
     m = re.search(r"AU\s*(\d+)", str(sz), re.I)
     if not m or "남성" not in str(sz):
         return 0, False
-    pat = re.compile(r"\(\s*%s\s*M\s*\)" % m.group(1), re.I)
+    n = m.group(1)
+    eu = str(int(n) + 33)
+    pats = [re.compile(p, re.I) for p in (
+        r"(?<!\d)%s\s*M(?![a-z])" % n,      # 9M, (9M)
+        r"(?<![a-z])M\s*%s(?!\d)" % n,      # M9
+        r"(?<![a-z])(?:AU|US)\s*%s(?!\d)" % n,  # AU9
+        r"^\s*%s\s*(?:\(|$)" % eu,          # 42, 42(9M)
+        r"EU\s*%s(?!\d)" % eu,              # EU42
+    )]
     q, found = 0, False
     for x in skus:
         if en is not None and x["color"] != en:
             continue
-        if any(isinstance(v, str) and pat.search(v) for k, v in x.items() if k != "color"):
+        if any(p.search(t) for t in sku_texts(x) for p in pats):
             q += int(x.get("stock") or 0)
             found = True
     return q, found
@@ -262,6 +288,9 @@ def plan_product(d, sup, R):
     brand = S.brand_of([brand_name(d), name, code], COL)
     if code in BRAND_OVERRIDE:
         brand = BRAND_OVERRIDE[code]
+    if code in SKIP_CODES:
+        R["연동 제외 (스토어 재고 그대로 둠)"].append(f"[{brand}] {code}  {name}")
+        return brand, code, None
     if brand not in sup:
         return brand, code, None
     if ONLY_CODES and code not in ONLY_CODES:
@@ -324,6 +353,11 @@ def plan_product(d, sup, R):
                     q, found = q2, True
             if not found and c.get("usable"):
                 R["공급처에 없는 사이즈 (품절)"].append(f"[{brand}] {code}  '{ko or ''}/{sz}'")
+                if is_oz and code not in size_debug_done:
+                    size_debug_done.add(code)
+                    vals = sorted({t for x in skus for t in sku_texts(x)})
+                    R["사이즈 못 맞춘 오즈 상품의 공급처 사이즈 원본 (확인용)"].append(
+                        f"[{brand}] {code}  {', '.join(vals)[:500]}")
         new[c["id"]] = S.final_qty(q)
     return brand, code, new
 
@@ -390,6 +424,7 @@ def main():
     if MODE not in ("dry-run", "test-one", "apply"):
         sys.exit(f"MODE 값이 잘못됐습니다: {MODE}")
     print(f"모드: {MODE}  /  옵션 없는 상품 연동: {'켜짐' if INCLUDE_SINGLE else '꺼짐'}")
+    size_debug_done.clear()
     nv = Naver()
     nv.token()
     items = nv.list_products()
@@ -470,7 +505,10 @@ def main():
             todo = (plain or pool)[:1]
         else:
             todo = plans
-        for brand, code, no, d, new, changes in todo:
+        print(f"재고 변경 시작: {len(todo)}개")
+        for n_done, (brand, code, no, d, new, changes) in enumerate(todo, 1):
+            if n_done % 50 == 0:
+                print(f"  {n_done}/{len(todo)} 변경")
             before = snapshot(d)
             if SINGLE in new:
                 r = nv.put_product(no, build_single_body(d, new[SINGLE]))
@@ -510,7 +548,8 @@ def main():
              "공급처에 없는 상품 (전체 품절)", "공급처에 없는 색상 (품절)", "공급처에 없는 사이즈 (품절)",
              "옵션 없는 상품인데 공급처 색상이 여러 개 (합계로 반영, 확인 권장)",
              "추정 매칭 색상 (확인 권장)", "에버어그 재고 API엔 없지만 가격표에 있는 상품 (재고 유지)",
-             "오즈 공급처에 없는 상품 (재고 유지)",
+             "오즈 공급처에 없는 상품 (재고 유지)", "연동 제외 (스토어 재고 그대로 둠)",
+             "사이즈 못 맞춘 오즈 상품의 공급처 사이즈 원본 (확인용)",
              "건너뜀: 옵션 없음 (재고 유지)", "건너뜀: 단독형 옵션 (재고 유지)", "건너뜀: 간편 입력 옵션 (재고 유지)",
              "상세 조회 실패 (건너뜀)", "다른 브랜드 (건너뜀)"]
     order += [k for k in R if k not in order]
