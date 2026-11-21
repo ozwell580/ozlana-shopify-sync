@@ -702,6 +702,16 @@ def sync_data():
     except Exception as e:
         print(f"DK UGG 동기화 중 에러: {e}")
 
+    print("2-4. 오즈웨어(OZWEAR UGG) 재고 동기화 중...")
+    try:
+        import sync_ozwear_inventory  # 오즈웨어 전용 스크립트 (같은 저장소)
+        if sync_ozwear_inventory.sync_ozwear_inventory():
+            brands_ok.append("Ozwear")
+        else:
+            print("-> [Ozwear] 이번 회차 오즈웨어 재고 동기화 실패 (기존 재고 유지)")
+    except Exception as e:
+        print(f"오즈웨어 동기화 중 에러: {e}")
+
     print("3. 동기화 시각 저장 중...")
     if brands_ok:
         save_sync_time(shopify_headers, brands_ok)
