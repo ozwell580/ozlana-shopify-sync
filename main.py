@@ -2,6 +2,7 @@ import os
 import requests
 import json
 import time
+from datetime import datetime, timezone
 
 # ================= Configuration =================
 OZLANA_TOKEN = os.environ.get("OZLANA_TOKEN")
@@ -31,6 +32,10 @@ EVERUGG_GST_MULTIPLIER = 1.0
 DKUGG_API_URL = os.environ.get(
     "DKUGG_API_URL", "https://api.dkugg.dreamdaytech.com/api/product_stock?num=1"
 )
+
+# 재고표(사이트 상품 페이지)에 "마지막 동기화" 시각을 보여주기 위해
+# 동기화가 끝나면 Shopify 스토어 메타필드(custom.stock_synced_at)에 완료 시각을 저장한다.
+SHOPIFY_GRAPHQL_VERSION = "2025-10"
 
 # ================= Helper Functions =================
 # Shopify REST는 초당 2건 제한. 쓰기 요청 사이에 이만큼 쉰다.
@@ -460,7 +465,7 @@ def sync_dkugg(shopify_variants, location_id, shopify_headers):
     products = fetch_dkugg_products()
     if not products:
         print("-> DK UGG 재고 데이터를 가져오지 못했습니다.")
-        return
+        return False
 
     total_skus = sum(len(p.get("skus") or []) for p in products if isinstance(p, dict))
     print(f"-> DK UGG 상품 {len(products)}개 / 옵션 {total_skus}건 수집 완료!")
@@ -506,6 +511,41 @@ def sync_dkugg(shopify_variants, location_id, shopify_headers):
     print(f"-> [DK UGG] 총 {dk_updated}개 옵션 재고 세팅 완료! (변동 없음 {dk_same}개, 실패 {dk_failed}개)")
     if dk_unmatched:
         print(f"-> [DK UGG] Shopify에 없는 옵션 {len(dk_unmatched)}개 (예시 최대 10개): {dk_unmatched[:10]}")
+    return True
+
+
+# ================= 동기화 시각 저장 =================
+def save_sync_time(shopify_headers, brands_ok):
+    """동기화 완료 시각(UTC)을 Shopify 스토어 메타필드 custom.stock_synced_at에 저장.
+    사이트 재고표에는 시드니 시간으로 바뀌어 표시된다."""
+    store_domain = SHOPIFY_STORE.replace("https://", "").strip("/")
+    url = f"https://{store_domain}/admin/api/{SHOPIFY_GRAPHQL_VERSION}/graphql.json"
+    try:
+        res = requests.post(url, headers=shopify_headers, json={"query": "{ shop { id } }"}, timeout=30)
+        shop_id = res.json()["data"]["shop"]["id"]
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        mutation = """
+        mutation($m: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $m) { userErrors { field message } }
+        }"""
+        metafields = [{
+            "ownerId": shop_id,
+            "namespace": "custom",
+            "key": "stock_synced_at",
+            "type": "date_time",
+            "value": now,
+        }]
+        res = requests.post(url, headers=shopify_headers,
+                            json={"query": mutation, "variables": {"m": metafields}}, timeout=30)
+        body = res.json()
+        errors = (body.get("data") or {}).get("metafieldsSet", {}).get("userErrors") if body.get("data") else body.get("errors")
+        if errors:
+            print(f"❌ 동기화 시각 저장 실패: {errors}")
+        else:
+            print(f"-> 동기화 시각 저장 완료: {now} (UTC) / 성공 브랜드: {', '.join(brands_ok)}")
+    except Exception as e:
+        print(f"❌ 동기화 시각 저장 중 예외: {e}")
 
 
 # ================= Main Sync Execution =================
@@ -530,6 +570,9 @@ def sync_data():
 
     shopify_variants = get_existing_shopify_variants(shopify_headers)
     print(f"-> 총 {len(shopify_variants)}개 쇼피파이 SKU 매핑 완료")
+
+    # 이번 회차에 재고를 정상으로 받아온 브랜드 (하나라도 있으면 동기화 시각 저장)
+    brands_ok = []
 
     if OZLANA_TOKEN:
         print("2-1. 오즈라나 /stocks API 수집 중 (시드니+중국 창고)...")
@@ -596,6 +639,7 @@ def sync_data():
                                 updated_count += 1
 
                 print(f"-> [Ozlana] 총 {updated_count}개 옵션 재고 세팅 완료! (변동 없음 {same_count}개)")
+                brands_ok.append("Ozlana")
         except Exception as e:
             print(f"Ozlana 동기화 중 에러: {e}")
 
@@ -648,13 +692,21 @@ def sync_data():
         print(f"-> [EverUgg] 총 {eu_price_updated_count}개 옵션 가격(GST 10% 포함) 세팅 완료! (변동 없음 {eu_price_same_count}개)")
         if eu_unmatched:
             print(f"-> [EverUgg] 매칭 실패 SKU 예시 (최대 10개): {eu_unmatched[:10]}")
+        brands_ok.append("EverUgg")
     else:
         print("-> EverUgg 재고 데이터를 가져오지 못했습니다.")
 
     try:
-        sync_dkugg(shopify_variants, location_id, shopify_headers)
+        if sync_dkugg(shopify_variants, location_id, shopify_headers):
+            brands_ok.append("DK UGG")
     except Exception as e:
         print(f"DK UGG 동기화 중 에러: {e}")
+
+    print("3. 동기화 시각 저장 중...")
+    if brands_ok:
+        save_sync_time(shopify_headers, brands_ok)
+    else:
+        print("-> 이번 회차는 성공한 브랜드가 없어 동기화 시각을 갱신하지 않습니다.")
 
 if __name__ == "__main__":
     sync_data()
