@@ -1,7 +1,7 @@
 name: Ozlana Shopify Sync
 on:
   schedule:
-    - cron: '0 0,12 * * *'
+    - cron: '0 */6 * * *'   # 6시간마다 (UTC 0,6,12,18시 = 시드니 서머타임 11시,17시,23시,5시)
   workflow_dispatch:
 
 permissions:
@@ -29,6 +29,8 @@ jobs:
         SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         EVERUGG_USER_ID: ${{ secrets.EVERUGG_USER_ID }}
         EVERUGG_PASSWORD: ${{ secrets.EVERUGG_PASSWORD }}
+        OZWEAR_API_KEY: ${{ secrets.OZWEAR_API_KEY }}
+        OZWEAR_API_SECRET: ${{ secrets.OZWEAR_API_SECRET }}
       run: python main.py
     - name: CSV 파일 업로드
       uses: actions/upload-artifact@v4
