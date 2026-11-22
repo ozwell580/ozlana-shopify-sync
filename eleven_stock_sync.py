@@ -176,6 +176,7 @@ def plan_opts(name, opts, sup, R, code=None):
     colors_all = ", ".join(sorted({str(s["color"]) for s in skus}))
     color_cache = {}
     new = []
+    sized, missing = 0, []  # 사이즈가 있는 옵션 수 / 공급처에서 사이즈를 못 찾은 옵션
     for opt in opts:
         ko, sz = split_option(opt)
         en = None
@@ -195,10 +196,24 @@ def plan_opts(name, opts, sup, R, code=None):
         if sz is None:
             q = sum(x["stock"] for x in skus if en is None or x["color"] == en)
         else:
+            sized += 1
             q, found = S.size_stock(skus, en, sz, oz=is_oz, code=code)
             if not found:
-                R["공급처에 없는 사이즈 (품절)"].append(f"[{brand}] {code}  '{opt}'")
+                missing.append((opt, en))
         new.append(S.final_qty(q))
+
+    def sup_sizes(en):
+        """공급처 원래 사이즈 표기 (오즈웨어는 raw_size, 그 외는 size)"""
+        vals = [str(x.get("raw_size") or x["size"]) for x in skus if en is None or x["color"] == en]
+        return ", ".join(dict.fromkeys(vals)) or "-"
+
+    # 사이즈가 하나도 안 맞으면 품절이 아니라 '표기 차이'일 가능성이 큼 -> 0 으로 덮어쓰지 않고 재고 유지
+    if sized >= 2 and len(missing) == sized:
+        R["사이즈 표기가 하나도 안 맞음 (재고 유지, 확인 필요)"].append(
+            f"{tag}\n      11번가: {', '.join(o for o, _ in missing)}\n      공급처: {sup_sizes(missing[0][1])}")
+        return brand, code, None
+    for opt, en in missing:
+        R["공급처에 없는 사이즈 (품절)"].append(f"[{brand}] {code}  '{opt}'  (공급처 사이즈: {sup_sizes(en)})")
     return brand, code, new
 
 
