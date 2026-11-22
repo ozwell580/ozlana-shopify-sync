@@ -182,6 +182,8 @@ OZ_SML_MAP = {"S": "AU4", "M": "AU5", "L": "AU6"}
 # 상품별 사이즈 연결: {상품코드: {스마트스토어 사이즈(괄호 앞): 공급처 사이즈}}
 OZ_SIZE_ALIAS = {
     "OB750": {"S": "6-7M", "M": "8-9M", "L": "10-11M", "XL": "12-13M"},
+    # OB1005 태그 지퍼 앵클 부츠: 공급처는 남성 AU 표기 39(6M) ~ 45(12M)
+    "OB1005": {f"EU{eu}": f"{eu - 33}M" for eu in range(39, 46)},
 }
 
 
@@ -659,6 +661,9 @@ def api_size_keys(size):
     m = re.fullmatch(r"[A-Z]+\((\d+/\d+)\D.*\)", s)  # 오즈웨어 'S(35/36 AUS5/6)' -> '35/36'
     if m:
         keys.add(m.group(1))
+    m = re.fullmatch(r"(?:EU)?(\d{2})\((\d{1,2})M\)", s)  # 오즈웨어 남성 '39(6M)' -> 'EU39', '6M'
+    if m:
+        keys.update({"EU" + m.group(1), m.group(2) + "M"})
     if re.fullmatch(r"\d+(/\d+)+", s):  # 35/36
         for n in s.split("/"):
             keys.add("EU" + n)
