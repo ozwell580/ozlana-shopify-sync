@@ -6,7 +6,9 @@ UGG AUS 대량주문 양식 자동 생성 스크립트
 동작 방식:
 1. 템플릿 파일(UGGAUS_order_form_template.xlsx)을 "틀"로 그대로 불러옴
    - 배송정보 시트, 사이즈 차트, 서식, 시트 구조는 전부 그대로 유지됨
-2. 각 시트(AS UGG / Ozlana / OZWEAR)의 아래 칸만 Shopify 최신 데이터로 덮어씀
+2. 각 시트(AS UGG / Ozlana / OZWEAR / DK UGG)의 아래 칸만 Shopify 최신 데이터로 덮어씀
+   - 템플릿에 DK UGG 시트가 없으면 AS UGG 시트 서식을 복사해서 자동으로 만듦
+   - 배송정보 시트의 무게 자동계산 수식도 네 시트를 모두 찾도록 매번 다시 씀
    - A~G열: 브랜드, 상품명, 색상, 사이즈, 가격(AUD), 재고, SKU
    - H열  : 무게(kg)  ← Shopify 상품 무게 (update_weights.py로 넣은 값)
    - Z열  : 조회키    ← 배송정보 시트의 무게 자동계산 수식이 참조하는 칸
@@ -36,7 +38,15 @@ SHEET_VENDOR_MAP = {
     "AS UGG": "AS UGG",
     "Ozlana": "Ozlana",
     "OZWEAR": "OZWEAR UGG",
+    "DK UGG": "DK UGG",
 }
+
+# 템플릿에 시트가 없을 때 서식을 복사해 올 기준 시트 (사이즈 차트가 없는 시트)
+SHEET_COPY_BASE = {
+    "DK UGG": "AS UGG",
+}
+
+SHIPPING_SHEET = "배송정보"
 
 HEADER = ["브랜드", "상품명", "색상", "사이즈", "가격(AUD)", "재고", "SKU", "무게(kg)"]
 
@@ -199,6 +209,77 @@ def write_sheet(ws, vendor_label, rows):
     ws.column_dimensions["Z"].hidden = True
 
 
+def ensure_sheets(wb):
+    """SHEET_VENDOR_MAP에 있는데 템플릿에 없는 시트는 기준 시트 서식을 복사해서 만든다."""
+    for sheet_name in SHEET_VENDOR_MAP:
+        if sheet_name in wb.sheetnames:
+            continue
+        base = SHEET_COPY_BASE.get(sheet_name)
+        if not base or base not in wb.sheetnames:
+            print(f"[건너뜀] '{sheet_name}' 시트를 만들 기준 시트가 없습니다.")
+            continue
+        ws = wb.copy_worksheet(wb[base])
+        ws.title = sheet_name
+        src = wb[base]
+        ws.freeze_panes = src.freeze_panes
+        ws.auto_filter.ref = src.auto_filter.ref
+        print(f"[추가] 템플릿에 없던 '{sheet_name}' 시트를 '{base}' 서식으로 만들었습니다.")
+
+
+def sheet_ref(name):
+    """수식에서 쓰는 시트 이름 (공백 등이 있으면 작은따옴표로 감쌈)"""
+    return name if name.isalnum() else f"'{name}'"
+
+
+def weight_formula(r, sheet_names):
+    """배송정보 무게(kg) 수식: SKU로 먼저 찾고, 없으면 상품명|색상|사이즈 조회키로 찾는다."""
+    key = f'UPPER(TRIM(H{r}))&"|"&UPPER(TRIM(I{r}))&"|"&UPPER(TRIM(J{r}))'
+    terms = []
+    for n in sheet_names:
+        s = sheet_ref(n)
+        terms.append(f"INDEX({s}!$H:$H,MATCH(TRIM(L{r}),{s}!$G:$G,0))")
+    for n in sheet_names:
+        s = sheet_ref(n)
+        terms.append(f"INDEX({s}!$H:$H,MATCH({key},{s}!$Z:$Z,0))")
+    nested = terms[-1]
+    for t in reversed(terms[:-1]):
+        nested = f"IFERROR({t},{nested})"
+    return f'=IF(H{r}="","",IFERROR(IF(K{r}="",1,K{r})*{nested},"상품명/색상/사이즈 확인"))'
+
+
+def update_shipping_sheet(wb):
+    """배송정보 시트의 무게 수식과 안내 문구를 현재 상품 시트 목록에 맞게 갱신한다."""
+    if SHIPPING_SHEET not in wb.sheetnames:
+        return
+    ws = wb[SHIPPING_SHEET]
+    sheet_names = [n for n in SHEET_VENDOR_MAP if n in wb.sheetnames]
+
+    # 무게(kg) 열 찾기 (헤더 이름으로)
+    weight_col = None
+    for c in ws[1]:
+        if c.value and "무게" in str(c.value):
+            weight_col = c.column
+            break
+    if not weight_col:
+        return
+
+    count = 0
+    for r in range(2, ws.max_row + 1):
+        cell = ws.cell(row=r, column=weight_col)
+        if isinstance(cell.value, str) and cell.value.startswith("=IF(H"):
+            cell.value = weight_formula(r, sheet_names)
+            count += 1
+
+    # 안내 문구의 시트 목록 갱신
+    sheet_list = " / ".join(sheet_names)
+    for row in ws.iter_rows(min_row=1, max_row=10):
+        for c in row:
+            if isinstance(c.value, str) and "AS UGG / Ozlana / OZWEAR" in c.value and sheet_list not in c.value:
+                c.value = c.value.replace("AS UGG / Ozlana / OZWEAR", sheet_list)
+
+    print(f"[배송정보] 무게 수식 {count}개 갱신 (조회 시트: {sheet_list})")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--template", required=True, help="틀로 쓸 기존 xlsx 파일 경로")
@@ -221,6 +302,7 @@ def main():
         print(f"[참고] 매핑 대상에 없는 vendor 값 예시: {sorted(unmatched_vendors)[:20]}")
 
     wb = openpyxl.load_workbook(args.template)  # 서식/사이즈차트 유지 위해 일반 로드
+    ensure_sheets(wb)
 
     for sheet_name, vendor in SHEET_VENDOR_MAP.items():
         if sheet_name not in wb.sheetnames:
@@ -235,6 +317,8 @@ def main():
         no_weight = sum(1 for r in rows if not r["무게(kg)"])
         print(f"[{sheet_name}] 상품 {len(products)}개, variant {len(rows)}개 반영 (무게 없는 variant {no_weight}개)")
         write_sheet(wb[sheet_name], vendor, rows)
+
+    update_shipping_sheet(wb)
 
     os.makedirs(args.out_dir, exist_ok=True)
     today = datetime.date.today().isoformat()
