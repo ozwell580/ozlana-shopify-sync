@@ -32,6 +32,12 @@
   - 같은 상품번호가 여러 파일에 있으면 한 번만 처리
   - 유료배송(1개마다 부과): 판매가에서 배송비 몫을 빼고 배송비로 받음 (롱부츠·가방·아우터 17,000 / 미니·숏·앵클부츠·플랫폼·스니커즈 14,000 / 키링·참·펜던트 9,900 / 그 외 11,000원)
     이미 바뀐 상품은 다시 빼지 않음. 끄려면 PAID_SHIPPING=0
+  - 할인 유지 (블프 특가 등):
+    forms 안의 옛 수정양식에는 할인 칸이 비어 있어서, 그대로 올리면 스마트스토어에 걸어둔 할인이 지워짐.
+    -> 할인을 건 뒤 그 상품들만 '수정양식 다운로드'해서 forms_discount/ 폴더에 넣어두면
+       상품번호가 같은 상품의 '할인/혜택정보' 칸(즉시할인·예약할인·복수구매할인·포인트·무이자·사은품)을
+       그 파일 값으로 채워서 올림. (시드니셀러는 forms_sydney_discount/)
+    -> 예약 할인 기간이 이미 끝난 상품은 예약 할인 칸을 비워서 올림 (끝난 기간 때문에 업로드 오류 나지 않게)
 """
 
 import glob
@@ -49,6 +55,12 @@ OUT_PREFIX = os.environ.get("OUT_PREFIX", "smartstore_stock")  # 시드니셀러
 OUT_FILE = f"{OUT_PREFIX}_upload.xlsx"
 UPLOAD_LIMIT = 450  # 스마트스토어 수정양식 업로드 최대 500개
 REPORT_FILE = f"{OUT_PREFIX}_report.txt"
+# 할인 유지용 최신 수정양식 폴더 (forms -> forms_discount, forms_sydney -> forms_sydney_discount)
+DISCOUNT_DIR = os.environ.get("DISCOUNT_DIR") or (FORMS_DIR.rstrip("/\\") + "_discount")
+# 할인/혜택정보 칸: 이 칸부터 이 칸까지 그대로 옮김
+DISCOUNT_FIRST_COL = "즉시할인 값\n(기본할인)"
+DISCOUNT_LAST_COL = "사은품"
+RESERVE_COLS = ("예약 할인 값", "예약 할인 단위", "예약 할인 기간")
 
 SAFETY_STOCK = int(os.environ.get("SAFETY_STOCK", "0"))  # 공급처 재고에서 빼고 올릴 수량
 MAX_STOCK = 999
@@ -814,6 +826,74 @@ def everugg_label(api_size):
 
 
 # ================================================================ 메인
+# ================================================================ 할인 유지 (블프 특가 등)
+def load_discounts(header):
+    """DISCOUNT_DIR 안의 최신 수정양식에서 상품번호별 '할인/혜택정보' 칸 값을 읽음.
+    칸 이름으로 맞추므로 양식 칸 순서가 조금 달라도 됨."""
+    files = sorted(glob.glob(os.path.join(DISCOUNT_DIR, "*.xlsx")))
+    if not files:
+        return {}, []
+    try:
+        a = header.index(DISCOUNT_FIRST_COL)
+        b = header.index(DISCOUNT_LAST_COL)
+    except ValueError:
+        SUPPLIER_NOTES.append("할인 유지: 양식에서 할인/혜택정보 칸을 못 찾아 건너뜀")
+        return {}, []
+    names = header[a:b + 1]
+    found = {}
+    for f in files:
+        ws = openpyxl.load_workbook(f).active
+        h = [c.value for c in ws[2]]
+        idx = {k: i for i, k in enumerate(h)}
+        if "상품번호" not in idx or any(k not in idx for k in names):
+            SUPPLIER_NOTES.append(f"할인 유지: {os.path.basename(f)} 양식 칸 구성이 달라서 건너뜀")
+            continue
+        for r in ws.iter_rows(min_row=6, values_only=True):
+            pid = r[idx["상품번호"]]
+            if not pid:
+                continue
+            found[str(pid)] = {k: r[idx[k]] for k in names}
+    print(f"할인 유지 파일: {files}  상품 {len(found)}개")
+    return found, names
+
+
+def reserve_ended(period):
+    """'2026-11-25 00:00\\n2026-11-30 23:59' 형태에서 종료 시각이 지났으면 True (한국 시간 기준)"""
+    if not period:
+        return False
+    ends = re.findall(r"(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})", str(period))
+    if len(ends) < 2:
+        return False
+    y, mo, d, hh, mm = (int(x) for x in ends[-1])
+    now_kst = time.gmtime(time.time() + 9 * 3600)
+    end = (y, mo, d, hh, mm)
+    cur = (now_kst.tm_year, now_kst.tm_mon, now_kst.tm_mday, now_kst.tm_hour, now_kst.tm_min)
+    return cur > end
+
+
+def apply_discounts(out_rows, col, header, R):
+    keep, names = load_discounts(header)
+    for r in out_rows:
+        pid = str(r[col["상품번호"]])
+        if pid in keep:
+            for k in names:
+                r[col[k]] = keep[pid][k]
+            d = keep[pid]
+            desc = []
+            now_v, now_u = d.get(DISCOUNT_FIRST_COL), d.get("즉시할인 단위\n(기본할인)")
+            res_v, res_u = d.get("예약 할인 값"), d.get("예약 할인 단위")
+            if now_v:
+                desc.append(f"즉시 {now_v}{now_u or ''}")
+            if res_v:
+                desc.append(f"예약 {res_v}{res_u or ''}")
+            R["할인 유지"].append(f"{r[col['판매자 상품코드']]}  {', '.join(desc) or '할인 없음'}  {r[col['상품명']]}")
+        # 끝난 예약 할인은 비움
+        if all(k in col for k in RESERVE_COLS) and reserve_ended(r[col["예약 할인 기간"]]):
+            for k in RESERVE_COLS:
+                r[col[k]] = None
+            R["끝난 예약 할인 비움"].append(f"{r[col['판매자 상품코드']]}  {r[col['상품명']]}")
+
+
 def main():
     files = sorted(glob.glob(os.path.join(FORMS_DIR, "*.xlsx")))
     if not files:
@@ -1106,6 +1186,9 @@ def main():
         for r in out_rows:
             apply_paid_shipping(r, col, R)
 
+    # 할인 유지 (블프 특가 등) - 유료배송 계산 뒤에 덮어씀
+    apply_discounts(out_rows, col, header, R)
+
     for (brand, code), n in dup_names.items():
         if n > 1:
             R["중복 등록 상품(확인 권장)"].append(f"[{brand}] {code}  {n}개")
@@ -1132,7 +1215,7 @@ def main():
         wb.save(name)
         out_files.append(f"{name} ({len(chunk)}개)")
 
-    order = ["오즈 못 찾은 상품(재고 유지)", KEEP, "유료배송 전환", "배송비 유형 확인 필요(변경 안 함)", "사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
+    order = ["할인 유지", "끝난 예약 할인 비움", "오즈 못 찾은 상품(재고 유지)", KEEP, "유료배송 전환", "배송비 유형 확인 필요(변경 안 함)", "사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
              "추정 매칭 색상(확인 권장)", "중복 등록 상품(확인 권장)",
              "간편 입력 옵션(엑셀 수정 불가, 업로드 제외)", "단독형 2단 옵션(상품 재고만 갱신)",
              "단독형 -> 조합형 전환", "판매자 상품코드 채움", "기타 브랜드(업로드 제외)"]
