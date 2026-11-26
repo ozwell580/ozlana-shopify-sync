@@ -166,7 +166,7 @@ COLOR_MAP = {
     "클라우드": "Cloud", "펄리버": "Pearl River", "애쉬": "Ash", "메탈릭핑크": "Metallic Pink",
     "메탈릭브론즈": "Metallic Bronze", "초코": "Chocolate",
     "크리미그레이": "Creamy Grey", "오트밀크": "Oat Milk", "내추럴베이지": "Natural Beige",
-    "내추럴브라운": "Natural Brown", "페일마브": "Pale Mauve", "채스트넛": "Chestnut", "캐러멜": "Caramel", "엠버": "Umber",
+    "내추럴브라운": "Natural Brown", "페일마브": "Pale Mauve", "페일마우브": "Pale Mauve", "채스트넛": "Chestnut", "캐러멜": "Caramel", "엠버": "Umber",
 }
 
 # 공급처 색상 표기 오타/별칭 (영문, norm_en 기준) -> 올바른 표기
@@ -186,8 +186,20 @@ PRODUCT_COLOR_ALIAS = {
     ("OZ8007", "토프"): "MUSHROOM",
     ("OZ8011", "토프"): "MUSHROOM",
 }
+# 상품별로 판매할 색상만 지정: {상품코드: [색상, ...]}  (공급처 영문 색상 또는 스토어 한글 색상)
+# 여기 없는 색상은 마켓오세아니아 엑셀에선 숨김(사용여부 N)+재고 0, 시드니셀러 API에선 재고 0(품절)
+ONLY_COLORS = {
+    "OB085II": ["CHESTNUT"],                                  # 공급처에 체스트넛만 남음 (2026-11)
+    "OB007II": ["CHESTNUT", "OLIVE", "BRONZE", "PALE MAUVE"],  # (2026-11)
+    "OB022II": ["CHESTNUT", "OLIVE", "PALE MAUVE"],            # (2026-11)
+}
+# 공급처 재고와 상관없이 전체 품절로 둘 상품 (옵션은 그대로, 재고만 0). 재입고되면 여기서 지우기
+SOLDOUT_CODES = {
+    "OB114II",  # 공급처 전 컬러·전 사이즈 품절 (2026-11)
+}
 # 스마트스토어 코드 -> 공급처 코드
-OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX", "OZ658K": "OB658K", "OB936": "OB936W"}
+# (OB936은 남성 상품이라 공급처 OB936(남성 39(6M)~45(12M))과 그대로 맞춤. 여성은 OB936W)
+OZ_CODE_ALIAS = {"OZ1023": "OZ1023EX", "OZ658K": "OB658K"}
 # 오즈라나 S/M/L 상품 -> 공급처 4#/5#/6#
 OZ_SML_CODES = {f"OZ80{n:02d}" for n in range(1, 15)}  # OZ8001~OZ8014
 OZ_SML_MAP = {"S": "AU4", "M": "AU5", "L": "AU6"}
@@ -605,6 +617,39 @@ def norm_ko(s):
     return re.sub(r"[\s/]+", "", str(s or ""))
 
 
+def color_allowed(code, ko, skus=None):
+    """ONLY_COLORS에 지정된 상품이면 지정 색상만 True.
+    스토어 한글 색상이 그대로 있거나, 공급처 영문 색상으로 바꿨을 때 목록에 있으면 판매"""
+    allow = ONLY_COLORS.get(str(code or "").upper())
+    if not allow or ko is None:
+        return True
+    if norm_ko(ko) in {norm_ko(a) for a in allow}:
+        return True
+    allow_en = {norm_en(a) for a in allow}
+    en = ko_color_to_en(ko)
+    if en and norm_en(en) in allow_en:
+        return True
+    if skus:
+        c, _ = find_color(skus, ko, allow_guess=False, allow_single=False, code=code)
+        if c and norm_en(c) in allow_en:
+            return True
+    return False
+
+
+def option_groups(optnames, value_rows):
+    """(사이즈 그룹 번호, 색상 그룹 번호).
+    옵션명에 '사이즈'/'size'가 없어도 값이 전부 사이즈 모양이면(예: '35(5L)') 사이즈 그룹으로 봄"""
+    def looks_size(i):
+        vs = [r[i] for r in value_rows if i < len(r) and r[i]]
+        return bool(vs) and all(is_size_label(v) for v in vs)
+    size_idx = next((i for i, n in enumerate(optnames)
+                     if "사이즈" in str(n) or "SIZE" in str(n).upper()), None)
+    if size_idx is None:
+        size_idx = next((i for i in range(len(optnames)) if looks_size(i)), None)
+    color_idx = next((i for i in range(len(optnames)) if i != size_idx), None)
+    return size_idx, color_idx
+
+
 def norm_en(s):
     t = re.sub(r"[\s\-/()&]+", "", str(s or "")).lower()
     for a, b in EN_COLOR_ALIAS.items():
@@ -976,6 +1021,16 @@ def main():
             out_brands.append(brand)
             continue
 
+        # 전체 품절로 고정한 상품
+        if code in SOLDOUT_CODES:
+            if typ == "조합형":
+                r[col["옵션 재고수량"]] = "\n".join(["0"] * len(lines(r, "옵션번호")))
+            r[col["재고수량"]] = 0
+            R["전체 품절 고정(SOLDOUT_CODES)"].append(f"[{brand}] {code}  {name}")
+            out_rows.append(r)
+            out_brands.append(brand)
+            continue
+
         # 공급처에 없는 상품 -> 품절
         if not skus:
             if typ == "조합형":
@@ -1002,6 +1057,11 @@ def main():
                 continue
             opts = [c.strip() for c in vals[0].split(",") if c.strip()]
             optname = (lines(r, "옵션명") or ["컬러"])[0]
+            if code in ONLY_COLORS and "사이즈" not in optname:
+                dropped = [o for o in opts if not color_allowed(code, o, skus)]
+                opts = [o for o in opts if color_allowed(code, o, skus)]
+                if dropped:
+                    R["판매 색상 지정(나머지 색상 숨김)"].append(f"[{brand}] {code}  숨김: {', '.join(dropped)}")
             qtys = []
             if "사이즈" in optname:
                 for o in opts:
@@ -1042,8 +1102,7 @@ def main():
             prices = ["0"] * len(vals)
         if len(uses) != len(vals):
             uses = ["Y"] * len(vals)
-        size_idx = next((i for i, n in enumerate(optnames) if "사이즈" in n), None)
-        color_idx = next((i for i, n in enumerate(optnames) if "사이즈" not in n), None)
+        size_idx, color_idx = option_groups(optnames, [[p.strip() for p in v.split(",")] for v in vals])
         parsed = []
         for v in vals:
             parts = [p.strip() for p in v.split(",")]
@@ -1092,8 +1151,11 @@ def main():
             sup_sizes = sorted({s["size"] for s in skus}, key=size_sort_key)
             colors_ko = []
             for c, _ in parsed:
-                if c not in colors_ko:
+                if c not in colors_ko and color_allowed(code, c, skus):
                     colors_ko.append(c)
+            dropped = sorted({c for c, _ in parsed if not color_allowed(code, c, skus)})
+            if dropped:
+                R["판매 색상 지정(나머지 색상 숨김)"].append(f"[{brand}] {code}  숨김: {', '.join(dropped)}")
             new_opts, labels_seen = [], set()
             for c in colors_ko:
                 en, ok = resolve(c)
@@ -1160,7 +1222,16 @@ def main():
         if len(old_q) != len(vals):
             old_q = ["0"] * len(vals)
         qtys = []
-        for (c, s), v, use, oq in zip(parsed, vals, uses, old_q):
+        new_uses = list(uses)
+        dropped = []
+        for i, ((c, s), v, use, oq) in enumerate(zip(parsed, vals, uses, old_q)):
+            if not color_allowed(code, c, skus):
+                # 판매 안 하는 색상 -> 숨김 + 재고 0
+                new_uses[i] = "N"
+                qtys.append("0")
+                if c not in dropped:
+                    dropped.append(c)
+                continue
             en, ok = resolve(c)
             if not ok:
                 qtys.append("0")
@@ -1177,6 +1248,9 @@ def main():
                     else:
                         R["공급처에 없는 사이즈(품절)"].append(f"[{brand}] {code}  '{v}'")
             qtys.append(str(final_qty(q)))
+        if dropped:
+            r[col["옵션 사용여부"]] = "\n".join(new_uses)
+            R["판매 색상 지정(나머지 색상 숨김)"].append(f"[{brand}] {code}  숨김: {', '.join(dropped)}")
         r[col["옵션 재고수량"]] = "\n".join(qtys)
         r[col["재고수량"]] = sum(int(x) for x in qtys)
         out_rows.append(r)
@@ -1215,7 +1289,7 @@ def main():
         wb.save(name)
         out_files.append(f"{name} ({len(chunk)}개)")
 
-    order = ["할인 유지", "끝난 예약 할인 비움", "오즈 못 찾은 상품(재고 유지)", KEEP, "유료배송 전환", "배송비 유형 확인 필요(변경 안 함)", "사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
+    order = ["할인 유지", "끝난 예약 할인 비움", "오즈 못 찾은 상품(재고 유지)", KEEP, "유료배송 전환", "배송비 유형 확인 필요(변경 안 함)", "전체 품절 고정(SOLDOUT_CODES)", "판매 색상 지정(나머지 색상 숨김)", "사이즈 재구성", "공급처에 없는 상품(품절)", "공급처에 없는 색상(품절)", "공급처에 없는 사이즈(품절)",
              "추정 매칭 색상(확인 권장)", "중복 등록 상품(확인 권장)",
              "간편 입력 옵션(엑셀 수정 불가, 업로드 제외)", "단독형 2단 옵션(상품 재고만 갱신)",
              "단독형 -> 조합형 전환", "판매자 상품코드 채움", "기타 브랜드(업로드 제외)"]
