@@ -297,6 +297,13 @@ def plan_product(d, sup, R):
         return brand, code, None
     oi = opt_info(d)
     combos = oi.get("optionCombinations") or []
+    if code in S.SOLDOUT_CODES:
+        R["전체 품절 고정 (SOLDOUT_CODES)"].append(f"[{brand}] {code}  {name}")
+        if combos:
+            return brand, code, {c["id"]: 0 for c in combos}
+        if oi.get("optionStandards") or not INCLUDE_SINGLE:
+            return brand, code, None
+        return brand, code, {SINGLE: 0}
     if not combos:
         kind = "간편 입력 옵션" if oi.get("optionSimple") else ("단독형 옵션" if oi.get("optionStandards") else "옵션 없음")
         if kind == "단독형 옵션" or not INCLUDE_SINGLE:
@@ -317,8 +324,8 @@ def plan_product(d, sup, R):
         return brand, code, {c["id"]: 0 for c in combos}
 
     names = group_names(oi)
-    size_idx = next((i for i, n in enumerate(names) if "사이즈" in n), None)
-    color_idx = next((i for i, n in enumerate(names) if "사이즈" not in n), None)
+    size_idx, color_idx = S.option_groups(
+        names, [[c.get("optionName1"), c.get("optionName2"), c.get("optionName3")] for c in combos])
     colors_all = ", ".join(sorted({str(s["color"]) for s in skus}))
     color_cache = {}
     new = {}
@@ -327,6 +334,13 @@ def plan_product(d, sup, R):
         ko = vals[color_idx] if color_idx is not None else None
         sz = vals[size_idx] if size_idx is not None else None
         en, ok = None, True
+        if not S.color_allowed(code, ko, skus):
+            # 판매 안 하는 색상 (smartstore_stock_sync.py ONLY_COLORS) -> 재고 0
+            new[c["id"]] = 0
+            line = f"[{brand}] {code}  '{ko}'"
+            if line not in R["판매 색상 지정 (나머지 색상 품절)"]:
+                R["판매 색상 지정 (나머지 색상 품절)"].append(line)
+            continue
         if ko is not None:
             if ko not in color_cache:
                 en_c, guess = match_color(skus, ko, code), False
